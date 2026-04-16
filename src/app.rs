@@ -600,7 +600,7 @@ impl eframe::App for ForgeApp {
 
 /// Detect image dimensions from file header bytes (PNG, JPEG, GIF, BMP, WebP).
 fn detect_image_size(data: &[u8]) -> Option<(u32, u32)> {
-    if data.len() < 30 { return None; }
+    if data.is_empty() { return None; }
     // PNG: bytes 16-23 contain width and height as big-endian u32
     if data.starts_with(b"\x89PNG\r\n\x1a\n") && data.len() >= 24 {
         let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
