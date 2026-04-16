@@ -1,0 +1,109 @@
+name: 'Agent Iteration Check'
+description: 'Track agent auto-fix iterations via PR comments to prevent infinite loops'
+
+inputs:
+  pr_number:
+    description: 'PR number'
+    required: true
+  max_iterations:
+    description: 'Maximum allowed iterations before stopping'
+    required: false
+    default: '5'
+  agent_type:
+    description: 'Agent type to track (review-fix or failure-fix)'
+    required: true
+  github_token:
+    description: 'GitHub token for API operations'
+    required: true
+
+outputs:
+  iteration_count:
+    description: 'Current iteration count'
+    value: ${{ steps.check.outputs.iteration_count }}
+  effective_max:
+    description: 'Effective max after [CONTINUE] multipliers'
+    value: ${{ steps.check.outputs.effective_max }}
+  continue_count:
+    description: 'Number of [CONTINUE] comments from admins'
+    value: ${{ steps.check.outputs.continue_count }}
+  should_skip:
+    description: 'Whether to skip this run'
+    value: ${{ steps.check.outputs.should_skip }}
+  exceeded_max:
+    description: 'Whether max iterations have been exceeded'
+    value: ${{ steps.check.outputs.exceeded_max }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check iteration count
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        MAX_ITERATIONS: ${{ inputs.max_iterations }}
+        AGENT_TYPE: ${{ inputs.agent_type }}
+      run: |
+        echo "=== Agent Iteration Check ==="
+        echo "PR: $PR_NUMBER | Max: $MAX_ITERATIONS | Type: $AGENT_TYPE"
+
+        # Try github-agents CLI first (faster, more accurate)
+        if command -v github-agents &>/dev/null; then
+          RESULT=$(github-agents iteration-check \
+            --pr "$PR_NUMBER" \
+            --agent-type "$AGENT_TYPE" \
+            --max-iterations "$MAX_ITERATIONS" \
+            --format json 2>/dev/null || echo "")
+
+          if [ -n "$RESULT" ] && echo "$RESULT" | jq -e . >/dev/null 2>&1; then
+            echo "iteration_count=$(echo "$RESULT" | jq -r '.iteration_count')" >> $GITHUB_OUTPUT
+            echo "effective_max=$(echo "$RESULT" | jq -r '.effective_max')" >> $GITHUB_OUTPUT
+            echo "continue_count=$(echo "$RESULT" | jq -r '.continue_count')" >> $GITHUB_OUTPUT
+            echo "exceeded_max=$(echo "$RESULT" | jq -r '.exceeded_max')" >> $GITHUB_OUTPUT
+            echo "should_skip=$(echo "$RESULT" | jq -r '.should_skip')" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        fi
+
+        # Fallback: count agent metadata comments
+        echo "Falling back to comment-based counting..."
+        ITERATION_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+          --paginate --jq "[.[] | select(.body | contains(\"agent-metadata:type=${AGENT_TYPE}\"))] | length" \
+          2>/dev/null || echo "0")
+
+        CONTINUE_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+          --paginate --jq '[.[] | select(.body | test("\\[CONTINUE\\]"))] | length' \
+          2>/dev/null || echo "0")
+
+        EFFECTIVE_MAX=$(( MAX_ITERATIONS + CONTINUE_COUNT * MAX_ITERATIONS ))
+        EXCEEDED_MAX="false"
+        SHOULD_SKIP="false"
+        if [ "$ITERATION_COUNT" -ge "$EFFECTIVE_MAX" ]; then
+          EXCEEDED_MAX="true"
+          SHOULD_SKIP="true"
+        fi
+
+        echo "iteration_count=$ITERATION_COUNT" >> $GITHUB_OUTPUT
+        echo "effective_max=$EFFECTIVE_MAX" >> $GITHUB_OUTPUT
+        echo "continue_count=$CONTINUE_COUNT" >> $GITHUB_OUTPUT
+        echo "exceeded_max=$EXCEEDED_MAX" >> $GITHUB_OUTPUT
+        echo "should_skip=$SHOULD_SKIP" >> $GITHUB_OUTPUT
+
+        if [ "$EXCEEDED_MAX" = "true" ]; then
+          COMMENT_FILE=$(mktemp)
+          cat > "$COMMENT_FILE" <<COMMENT_EOF
+        ## Agent Iteration Limit Reached
+        <!-- agent-metadata:type=${AGENT_TYPE}:iteration=${ITERATION_COUNT}:limit-reached -->
+
+        The auto-fix agent has reached the iteration limit (**${ITERATION_COUNT}/${EFFECTIVE_MAX}**).
+        Further automated fixes have been paused.
+
+        **To allow more iterations:**
+        - An admin can comment \`[CONTINUE]\` to extend the limit
+        - Or address the issues manually
+        - Or add the \`no-auto-fix\` label to disable automated fixes
+        COMMENT_EOF
+          gh pr comment "$PR_NUMBER" --body-file "$COMMENT_FILE" || true
+          rm -f "$COMMENT_FILE"
+        fi
