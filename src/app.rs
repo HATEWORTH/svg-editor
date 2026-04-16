@@ -266,8 +266,9 @@ impl ForgeApp {
         // Use user config directory instead of exe directory
         if let Some(config_dir) = dirs::config_dir() {
             let app_dir = config_dir.join("svg-forge");
-            let _ = std::fs::create_dir_all(&app_dir);
-            return app_dir.join("recent-files.txt");
+            if std::fs::create_dir_all(&app_dir).is_ok() && app_dir.is_dir() {
+                return app_dir.join("recent-files.txt");
+            }
         }
         // Fallback to exe directory
         let mut p = std::env::current_exe().unwrap_or_default();
@@ -634,6 +635,36 @@ fn detect_image_size(data: &[u8]) -> Option<(u32, u32)> {
             let seg_len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
             if seg_len < 2 { break; } // Invalid segment, abort
             i += 2 + seg_len;
+        }
+    }
+    // WebP: RIFF....WEBP with VP8/VP8L/VP8X chunks
+    if data.len() >= 30 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+        // Check for VP8X (extended format) at offset 12
+        if &data[12..16] == b"VP8X" && data.len() >= 30 {
+            // VP8X: canvas width at bytes 24-26 (24-bit LE + 1), height at 27-29 (24-bit LE + 1)
+            let w = (data[24] as u32) | ((data[25] as u32) << 8) | ((data[26] as u32) << 16);
+            let h = (data[27] as u32) | ((data[28] as u32) << 8) | ((data[29] as u32) << 16);
+            return Some((w + 1, h + 1));
+        }
+        // Check for VP8L (lossless) at offset 12
+        if &data[12..16] == b"VP8L" && data.len() >= 25 {
+            // VP8L: signature byte 0x2F at offset 21, then 14-bit width and 14-bit height
+            if data[21] == 0x2F {
+                let bits = u32::from_le_bytes([data[22], data[23], data[24], data[25]]);
+                let w = (bits & 0x3FFF) + 1;
+                let h = ((bits >> 14) & 0x3FFF) + 1;
+                return Some((w, h));
+            }
+        }
+        // Check for VP8 (lossy) at offset 12
+        if &data[12..16] == b"VP8 " && data.len() >= 30 {
+            // VP8 bitstream starts at offset 20, frame tag at 23-25, then dimensions
+            // Look for frame sync code 0x9D012A at offset 23
+            if data.len() >= 30 && data[23] == 0x9D && data[24] == 0x01 && data[25] == 0x2A {
+                let w = u16::from_le_bytes([data[26], data[27]]) & 0x3FFF;
+                let h = u16::from_le_bytes([data[28], data[29]]) & 0x3FFF;
+                return Some((w as u32, h as u32));
+            }
         }
     }
     None
