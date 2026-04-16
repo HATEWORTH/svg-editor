@@ -82,10 +82,14 @@ pub struct CanvasState {
     pub anim_duration: f64,
     pub anim_playing: bool,
     anim_last_instant: Option<std::time::Instant>,
+    // Shared font database (loaded once at startup for text rendering)
+    pub fontdb: std::sync::Arc<fontdb::Database>,
 }
 
 impl CanvasState {
     pub fn new() -> Self {
+        let mut fontdb = fontdb::Database::new();
+        fontdb.load_system_fonts();
         Self {
             zoom: 1.0,
             pan: Vec2::ZERO,
@@ -127,6 +131,7 @@ impl CanvasState {
             anim_duration: 0.0,
             anim_playing: false,
             anim_last_instant: None,
+            fontdb: std::sync::Arc::new(fontdb),
         }
     }
 
@@ -230,7 +235,7 @@ impl CanvasState {
         if self.svg_content.is_empty() {
             return;
         }
-        let opt = usvg::Options::default();
+        let opt = usvg::Options { fontdb: self.fontdb.clone(), ..Default::default() };
         if let Ok(tree) = usvg::Tree::from_str(&self.svg_content, &opt) {
             let mut raw = Vec::new();
             collect_bboxes_ordered(&mut raw, tree.root(), usvg::Transform::identity());
@@ -276,7 +281,7 @@ impl CanvasState {
             self.svg_content.clone()
         };
 
-        let opt = usvg::Options::default();
+        let opt = usvg::Options { fontdb: self.fontdb.clone(), ..Default::default() };
         let tree = match usvg::Tree::from_str(&render_svg, &opt) {
             Ok(t) => t,
             Err(_) => return,

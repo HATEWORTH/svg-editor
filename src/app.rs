@@ -223,7 +223,7 @@ impl ForgeApp {
     }
 
     fn export_png(&mut self, path: &std::path::Path) {
-        let opt = usvg::Options::default();
+        let opt = usvg::Options { fontdb: self.canvas.fontdb.clone(), ..Default::default() };
         let tree = match usvg::Tree::from_str(&self.canvas.svg_content, &opt) {
             Ok(t) => t,
             Err(e) => { self.status_msg = format!("Parse error: {}", e); return; }

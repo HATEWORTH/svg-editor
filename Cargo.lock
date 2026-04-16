@@ -3462,6 +3462,7 @@ dependencies = [
  "dirs",
  "eframe",
  "egui",
+ "fontdb",
  "notify",
  "resvg",
  "rfd",
