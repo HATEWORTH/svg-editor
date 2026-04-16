@@ -1583,38 +1583,56 @@ impl CanvasState {
 
         // Handle text input mode
         if self.annotation_text_editing {
-            // Consume text input events
-            ctx.input(|i| {
-                for event in &i.events {
-                    match event {
-                        egui::Event::Text(t) => {
-                            self.annotation_text_buffer.push_str(t);
-                        }
-                        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => {
-                            // Finish text annotation
-                            if let Some(start) = self.annotation_drag_start.take() {
-                                if !self.annotation_text_buffer.is_empty() {
-                                    self.annotations.push(Annotation::Text {
-                                        pos: start,
-                                        text: self.annotation_text_buffer.clone(),
-                                    });
-                                }
-                            }
-                            self.annotation_text_editing = false;
-                            self.annotation_text_buffer.clear();
-                        }
-                        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
-                            self.annotation_text_editing = false;
-                            self.annotation_text_buffer.clear();
-                            self.annotation_drag_start = None;
-                        }
-                        egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => {
-                            self.annotation_text_buffer.pop();
-                        }
-                        _ => {}
+            // Collect relevant events first (we'll consume them after processing)
+            let events: Vec<egui::Event> = ctx.input(|i| i.events.clone());
+            let mut finish_text = false;
+            let mut cancel_text = false;
+
+            for event in &events {
+                match event {
+                    egui::Event::Text(t) => {
+                        self.annotation_text_buffer.push_str(t);
+                    }
+                    egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => {
+                        finish_text = true;
+                    }
+                    egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
+                        cancel_text = true;
+                    }
+                    egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => {
+                        self.annotation_text_buffer.pop();
+                    }
+                    _ => {}
+                }
+            }
+
+            // Consume the events we processed to prevent them leaking to other widgets
+            ctx.input_mut(|i| {
+                i.events.retain(|e| {
+                    !matches!(e,
+                        egui::Event::Text(_) |
+                        egui::Event::Key { key: egui::Key::Enter | egui::Key::Escape | egui::Key::Backspace, pressed: true, .. }
+                    )
+                });
+            });
+
+            // Handle finish/cancel after event processing
+            if finish_text {
+                if let Some(start) = self.annotation_drag_start.take() {
+                    if !self.annotation_text_buffer.is_empty() {
+                        self.annotations.push(Annotation::Text {
+                            pos: start,
+                            text: self.annotation_text_buffer.clone(),
+                        });
                     }
                 }
-            });
+                self.annotation_text_editing = false;
+                self.annotation_text_buffer.clear();
+            } else if cancel_text {
+                self.annotation_text_editing = false;
+                self.annotation_text_buffer.clear();
+                self.annotation_drag_start = None;
+            }
 
             // Draw text cursor
             if let Some(pos) = self.annotation_drag_start {

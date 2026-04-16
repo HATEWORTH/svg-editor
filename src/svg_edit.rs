@@ -77,7 +77,7 @@ pub fn auto_assign_ids(svg: &str) -> String {
 /// Generate a descriptive element ID from tag name and attributes.
 /// Produces IDs like "red-rect-0", "blue-circle-1", "text-hello-2".
 fn generate_element_id(tag_name: &str, opening_tag: &str, counter: u32) -> String {
-    let mut parts: Vec<&str> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
 
     // Extract fill color for a prefix
     let color = extract_attr_value(opening_tag, "fill");
@@ -85,13 +85,13 @@ fn generate_element_id(tag_name: &str, opening_tag: &str, counter: u32) -> Strin
         if c != "none" {
             let name = quick_color_label(c);
             if !name.is_empty() {
-                parts.push(Box::leak(name.into_boxed_str()));
+                parts.push(name);
             }
         }
     }
 
     // Tag name
-    parts.push(tag_name);
+    parts.push(tag_name.to_string());
 
     // For text elements, try to grab text content (not in opening tag, so skip)
     // The layer panel will handle display names via describe_element
