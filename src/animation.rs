@@ -35,8 +35,7 @@ pub fn parse_animations(svg: &str) -> Vec<SmilAnimation> {
     };
 
     let mut anims = Vec::new();
-    let mut auto_id_counter = 0u32;
-    parse_node_animations(&doc.root(), &mut anims, "", svg, &mut auto_id_counter);
+    parse_node_animations(&doc.root(), &mut anims, "", svg);
     anims
 }
 
@@ -44,8 +43,7 @@ fn parse_node_animations(
     node: &roxmltree::Node,
     anims: &mut Vec<SmilAnimation>,
     parent_id: &str,
-    svg: &str,
-    auto_id: &mut u32,
+    _svg: &str,
 ) {
     for child in node.children() {
         if !child.is_element() { continue; }
@@ -101,7 +99,7 @@ fn parse_node_animations(
                 anims.push(anim);
             }
             _ => {
-                parse_node_animations(&child, anims, effective_id, svg, auto_id);
+                parse_node_animations(&child, anims, effective_id, _svg);
             }
         }
     }
@@ -175,11 +173,21 @@ pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
     // Apply composed transforms (multiple animateTransform on same element)
     for (id, transforms) in &transform_map {
         let combined = transforms.join(" ");
-        // Get existing static transform and prepend it
+        // Get existing static transform and prepend it to preserve base positioning
         if let Some(existing) = crate::svg_edit::get_attribute(&result, id, "transform") {
-            // Check if existing transform is from a previous animation eval (would contain animated values)
-            // Simple heuristic: if it starts with common animated patterns, replace it entirely
-            result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
+            // Check if existing transform looks like it's from animated values (contains animated patterns)
+            // If existing contains typical animated functions, it's likely already baked - replace entirely
+            let is_animated_only = existing.starts_with("translate(")
+                || existing.starts_with("rotate(")
+                || existing.starts_with("scale(");
+            if is_animated_only && !existing.contains("matrix(") {
+                // Purely animated transform, replace it
+                result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
+            } else {
+                // Has static transform (e.g., matrix), prepend it to preserve base positioning
+                let full_transform = format!("{} {}", existing, combined);
+                result = crate::svg_edit::set_attribute(&result, id, "transform", &full_transform);
+            }
         } else {
             result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
         }

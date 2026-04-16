@@ -107,8 +107,8 @@ impl CanvasState {
             zoom: 1.0,
             pan: Vec2::ZERO,
             svg_content: String::new(),
-            svg_width: 1920.0,
-            svg_height: 1080.0,
+            svg_width: 800.0,
+            svg_height: 600.0,
             texture: None,
             texture_dirty: true,
             selected_element: None,
@@ -183,6 +183,10 @@ impl CanvasState {
     }
 
     fn parse_dimensions(&mut self) {
+        // Reset to default dimensions first (prevents inheriting from previous file)
+        self.svg_width = 800.0;
+        self.svg_height = 600.0;
+
         if let Ok(doc) = roxmltree::Document::parse(&self.svg_content) {
             let root = doc.root_element();
 
