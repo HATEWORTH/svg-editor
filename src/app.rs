@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::collections::VecDeque;
 
 use crate::canvas::{CanvasState, EditTool};
+use crate::feedback::{self, AnnotationTool};
 use crate::layers::LayerPanel;
 use crate::project;
 use crate::svg_edit;
@@ -22,6 +23,9 @@ pub struct ForgeApp {
     unsaved: bool,
     recent_files: VecDeque<PathBuf>,
     show_layers: bool,
+    // Feedback dialog
+    show_feedback_dialog: bool,
+    feedback_instruction: String,
 }
 
 impl ForgeApp {
@@ -38,6 +42,8 @@ impl ForgeApp {
             unsaved: false,
             recent_files: VecDeque::new(),
             show_layers: true,
+            show_feedback_dialog: false,
+            feedback_instruction: String::new(),
         };
 
         match FileWatcher::new(&project_dir) {
@@ -344,6 +350,41 @@ impl ForgeApp {
             self.status_msg = format!("Embedded: {}", name);
         }
     }
+
+    fn export_feedback(&mut self) {
+        let svg_name = self.active_file.as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "untitled.svg".into());
+
+        let json = feedback::export_json(
+            &svg_name,
+            &self.canvas.selected_elements,
+            &self.canvas.annotations,
+            &self.feedback_instruction,
+        );
+
+        if let Some(ref path) = self.active_file {
+            match feedback::write_feedback(path, &json) {
+                Ok(feedback_path) => {
+                    let screenshot_path = feedback_path.with_extension("png");
+                    match self.canvas.save_screenshot_png(&screenshot_path) {
+                        Ok(()) => {
+                            self.status_msg = format!("Feedback exported: {} + screenshot", feedback_path.display());
+                        }
+                        Err(e) => {
+                            self.status_msg = format!("Feedback exported (screenshot failed: {})", e);
+                        }
+                    }
+                }
+                Err(e) => self.status_msg = format!("Feedback error: {}", e),
+            }
+        } else {
+            self.status_msg = "Save the file first before exporting feedback".into();
+        }
+
+        self.feedback_instruction.clear();
+    }
 }
 
 // ─── Main update loop ────────────────────────────────────
@@ -390,12 +431,30 @@ impl eframe::App for ForgeApp {
             self.layers.refresh(&self.canvas.svg_content);
             self.unsaved = true;
         }
-        // Tool switching
-        if ctx.input(|i| i.key_pressed(egui::Key::V) && !i.modifiers.command) {
-            self.canvas.tool = EditTool::Select;
+        // Tool switching (disabled during annotation text editing)
+        if !self.canvas.is_editing_annotation_text() {
+            if ctx.input(|i| i.key_pressed(egui::Key::V) && !i.modifiers.command) {
+                self.canvas.tool = EditTool::Select;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::A) && !i.modifiers.command) {
+                self.canvas.tool = EditTool::Node;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::C) && !i.modifiers.command) {
+                self.canvas.tool = EditTool::Annotate;
+                self.canvas.annotation_tool = AnnotationTool::Circle;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::W) && !i.modifiers.command) {
+                self.canvas.tool = EditTool::Annotate;
+                self.canvas.annotation_tool = AnnotationTool::Arrow;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::T) && !i.modifiers.command) {
+                self.canvas.tool = EditTool::Annotate;
+                self.canvas.annotation_tool = AnnotationTool::Text;
+            }
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::A) && !i.modifiers.command) {
-            self.canvas.tool = EditTool::Node;
+        // Feedback export shortcut
+        if ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.command) {
+            self.show_feedback_dialog = true;
         }
 
         // ─── Menu bar ───────────────────────────────────
@@ -464,6 +523,7 @@ impl eframe::App for ForgeApp {
                         ui.close_menu();
                         self.canvas.selected_element = None;
                         self.canvas.selected_bbox = None;
+                        self.canvas.selected_elements.clear();
                         self.layers.selected_id = None;
                     }
                 });
@@ -504,7 +564,14 @@ impl eframe::App for ForgeApp {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui: &mut egui::Ui| {
                     ui.label(format!("{} × {}", self.canvas.svg_width as i32, self.canvas.svg_height as i32));
-                    if let Some(ref s) = self.canvas.selected_element { ui.separator(); ui.label(format!("Selected: {}", s)); }
+                    let sel_count = self.canvas.selected_elements.len();
+                    if sel_count > 1 {
+                        ui.separator();
+                        ui.label(format!("Selected: {} elements", sel_count));
+                    } else if let Some(ref s) = self.canvas.selected_element {
+                        ui.separator();
+                        ui.label(format!("Selected: {}", s));
+                    }
                 });
             });
         });
@@ -585,8 +652,84 @@ impl eframe::App for ForgeApp {
                     ));
                     if node.clicked() { self.canvas.tool = EditTool::Node; }
                     node.on_hover_text("Node / Direct Selection (A)");
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // Annotation tools
+                    let circ = ui.add(egui::SelectableLabel::new(
+                        self.canvas.tool == EditTool::Annotate && self.canvas.annotation_tool == AnnotationTool::Circle,
+                        egui::RichText::new("\u{25EF}").size(18.0),
+                    ));
+                    if circ.clicked() { self.canvas.tool = EditTool::Annotate; self.canvas.annotation_tool = AnnotationTool::Circle; }
+                    circ.on_hover_text("Annotate Circle (C)");
+
+                    ui.add_space(4.0);
+
+                    let arr = ui.add(egui::SelectableLabel::new(
+                        self.canvas.tool == EditTool::Annotate && self.canvas.annotation_tool == AnnotationTool::Arrow,
+                        egui::RichText::new("\u{2197}").size(18.0),
+                    ));
+                    if arr.clicked() { self.canvas.tool = EditTool::Annotate; self.canvas.annotation_tool = AnnotationTool::Arrow; }
+                    arr.on_hover_text("Annotate Arrow (W)");
+
+                    ui.add_space(4.0);
+
+                    let txt = ui.add(egui::SelectableLabel::new(
+                        self.canvas.tool == EditTool::Annotate && self.canvas.annotation_tool == AnnotationTool::Text,
+                        egui::RichText::new("T").size(16.0),
+                    ));
+                    if txt.clicked() { self.canvas.tool = EditTool::Annotate; self.canvas.annotation_tool = AnnotationTool::Text; }
+                    txt.on_hover_text("Annotate Text (T)");
+
+                    ui.add_space(8.0);
+
+                    // Clear annotations button
+                    if !self.canvas.annotations.is_empty() {
+                        if ui.add(egui::Button::new(egui::RichText::new("\u{2715}").size(14.0)).small()).on_hover_text("Clear Annotations").clicked() {
+                            self.canvas.clear_annotations();
+                        }
+                    }
+
+                    // Feedback export button
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    let fb = ui.add(egui::Button::new(egui::RichText::new("\u{1F4E4}").size(16.0)).small());
+                    if fb.clicked() { self.show_feedback_dialog = true; }
+                    fb.on_hover_text("Export Feedback (Ctrl+F)");
                 });
             });
+
+        // ─── Feedback dialog ─────────────────────────────
+        if self.show_feedback_dialog {
+            egui::Window::new("Export Feedback for AI")
+                .collapsible(false)
+                .resizable(true)
+                .default_width(400.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui: &mut egui::Ui| {
+                    ui.label(format!("Selected: {} element(s)", self.canvas.selected_elements.len()));
+                    ui.label(format!("Annotations: {}", self.canvas.annotations.len()));
+                    ui.separator();
+                    ui.label("Instruction for AI:");
+                    ui.add(egui::TextEdit::multiline(&mut self.feedback_instruction)
+                        .desired_rows(4)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Describe what you want changed..."));
+                    ui.separator();
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        if ui.button("Export").clicked() {
+                            self.export_feedback();
+                            self.show_feedback_dialog = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.show_feedback_dialog = false;
+                        }
+                    });
+                });
+        }
 
         // ─── Canvas ──────────────────────────────────────
         egui::CentralPanel::default()

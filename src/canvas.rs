@@ -1,5 +1,6 @@
 use egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 use crate::animation;
+use crate::feedback::{self, Annotation, AnnotationTool};
 use crate::path_data::{self, PathCmd, PointKind};
 use crate::svg_edit;
 
@@ -23,6 +24,7 @@ struct ShapeAttrs {
 pub enum EditTool {
     Select,
     Node,
+    Annotate,
 }
 
 #[derive(Clone, PartialEq)]
@@ -82,6 +84,14 @@ pub struct CanvasState {
     pub anim_duration: f64,
     pub anim_playing: bool,
     anim_last_instant: Option<std::time::Instant>,
+    // Multi-select
+    pub selected_elements: Vec<String>,
+    // Annotations (drawn on top of SVG, not part of SVG file)
+    pub annotations: Vec<Annotation>,
+    pub annotation_tool: AnnotationTool,
+    annotation_drag_start: Option<Pos2>,
+    pub annotation_text_editing: bool,
+    pub annotation_text_buffer: String,
 }
 
 impl CanvasState {
@@ -127,6 +137,12 @@ impl CanvasState {
             anim_duration: 0.0,
             anim_playing: false,
             anim_last_instant: None,
+            selected_elements: Vec::new(),
+            annotations: Vec::new(),
+            annotation_tool: AnnotationTool::Circle,
+            annotation_drag_start: None,
+            annotation_text_editing: false,
+            annotation_text_buffer: String::new(),
         }
     }
 
@@ -615,8 +631,23 @@ impl CanvasState {
         }
 
         match self.tool {
-            EditTool::Select => self.show_select_tool(&response, &painter, cr, hover),
+            EditTool::Select => self.show_select_tool(&response, &painter, cr, hover, ctx),
             EditTool::Node => self.show_node_tool(&response, &painter, cr, hover),
+            EditTool::Annotate => self.show_annotate_tool(&response, &painter, cr, hover, ctx),
+        }
+
+        // Draw annotations on top in ALL tool modes
+        self.draw_annotations(&painter, cr, hover);
+
+        // Draw multi-select highlights (secondary selections)
+        for sel_id in &self.selected_elements.clone() {
+            if self.selected_element.as_ref() == Some(sel_id) { continue; } // primary already drawn
+            if let Some((_, bbox)) = self.element_bboxes.iter().find(|(id, _)| id == sel_id) {
+                let min = self.s2s(bbox.min, cr.min);
+                let max = self.s2s(bbox.max, cr.min);
+                let sr = Rect::from_min_max(min, max).expand(2.0);
+                painter.rect_stroke(sr, 0.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(79, 195, 247, 120)));
+            }
         }
     }
 
@@ -628,6 +659,7 @@ impl CanvasState {
         painter: &egui::Painter,
         cr: Rect,
         hover: Option<Pos2>,
+        ctx: &egui::Context,
     ) {
         // Draw selection overlay
         if let Some(bbox) = self.selected_bbox {
@@ -737,9 +769,11 @@ impl CanvasState {
                     }
                 }
 
-                // Try select / start move
-                self.try_select(svp);
-                if self.selected_element.is_some() {
+                // Try select / start move (with multi-select support)
+                let ctrl = ctx.input(|i| i.modifiers.ctrl);
+                let shift = ctx.input(|i| i.modifiers.shift);
+                self.try_select_multi(svp, ctrl, shift);
+                if self.selected_element.is_some() && !ctrl && !shift {
                     if let Some(ref id) = self.selected_element {
                         self.drag_start_translate = svg_edit::get_translate(&self.svg_content, id);
                     }
@@ -811,7 +845,9 @@ impl CanvasState {
         } else if response.clicked() && self.drag_mode == DragMode::None {
             if let Some(pos) = hover {
                 let svp = self.s2v(pos, cr.min);
-                self.try_select(svp);
+                let ctrl = ctx.input(|i| i.modifiers.ctrl);
+                let shift = ctx.input(|i| i.modifiers.shift);
+                self.try_select_multi(svp, ctrl, shift);
             }
         }
     }
@@ -931,16 +967,100 @@ impl CanvasState {
     // ─── Selection ──────────────────────────────────────
 
     fn try_select(&mut self, svg_pos: Pos2) {
-        self.selected_element = None;
-        self.selected_bbox = None;
+        self.try_select_multi(svg_pos, false, false);
+    }
 
-        for (id, bbox) in self.element_bboxes.iter().rev() {
-            if bbox.contains(svg_pos) {
-                self.selected_element = Some(id.clone());
-                self.selected_bbox = Some(*bbox);
-                return;
+    fn try_select_multi(&mut self, svg_pos: Pos2, ctrl: bool, shift: bool) {
+        // Find the topmost element under the cursor
+        let hit = self.element_bboxes.iter().rev()
+            .find(|(_, bbox)| bbox.contains(svg_pos))
+            .map(|(id, bbox)| (id.clone(), *bbox));
+
+        if let Some((id, bbox)) = hit {
+            if ctrl || shift {
+                // Toggle in/out of multi-selection
+                if let Some(pos) = self.selected_elements.iter().position(|s| s == &id) {
+                    self.selected_elements.remove(pos);
+                    // If we removed the primary, pick another or clear
+                    if self.selected_element.as_ref() == Some(&id) {
+                        self.selected_element = self.selected_elements.last().cloned();
+                        self.selected_bbox = self.selected_element.as_ref().and_then(|sel_id| {
+                            self.element_bboxes.iter().find(|(eid, _)| eid == sel_id).map(|(_, b)| *b)
+                        });
+                    }
+                } else {
+                    self.selected_elements.push(id.clone());
+                    self.selected_element = Some(id);
+                    self.selected_bbox = Some(bbox);
+                }
+            } else {
+                // Normal click — single select, clear multi
+                self.selected_elements.clear();
+                self.selected_elements.push(id.clone());
+                self.selected_element = Some(id);
+                self.selected_bbox = Some(bbox);
+            }
+        } else if !ctrl && !shift {
+            // Click on empty space — deselect all
+            self.selected_element = None;
+            self.selected_bbox = None;
+            self.selected_elements.clear();
+        }
+    }
+
+    pub fn clear_annotations(&mut self) {
+        self.annotations.clear();
+        self.annotation_text_editing = false;
+        self.annotation_text_buffer.clear();
+    }
+
+    pub fn is_editing_annotation_text(&self) -> bool {
+        self.annotation_text_editing
+    }
+
+    /// Get selected element bboxes for feedback export.
+    pub fn selected_bboxes(&self) -> Vec<(String, Rect)> {
+        self.selected_elements.iter()
+            .filter_map(|id| {
+                self.element_bboxes.iter()
+                    .find(|(eid, _)| eid == id)
+                    .map(|(eid, bbox)| (eid.clone(), *bbox))
+            })
+            .collect()
+    }
+
+    /// Capture a screenshot PNG with annotations overlaid.
+    pub fn save_screenshot_png(&self, path: &std::path::Path) -> Result<(), String> {
+        if self.svg_content.is_empty() { return Err("No SVG content".into()); }
+
+        // Build SVG with annotation overlay
+        let overlay = feedback::annotations_to_svg_overlay(
+            &self.annotations,
+            &self.selected_bboxes(),
+            self.svg_width,
+            self.svg_height,
+        );
+
+        // Combine: insert overlay content before closing </svg>
+        let mut combined = self.svg_content.clone();
+        if let Some(pos) = combined.rfind("</svg>") {
+            // Extract overlay inner content (between <svg...> and </svg>)
+            if let (Some(start), Some(end)) = (overlay.find('>'), overlay.rfind("</svg>")) {
+                let inner = &overlay[start + 1..end];
+                let group = format!("<g opacity=\"0.9\">{}</g>\n", inner);
+                combined.insert_str(pos, &group);
             }
         }
+
+        let opt = usvg::Options::default();
+        let tree = usvg::Tree::from_str(&combined, &opt).map_err(|e| format!("Parse: {}", e))?;
+        let w = self.svg_width as u32;
+        let h = self.svg_height as u32;
+        let mut pixmap = tiny_skia::Pixmap::new(w, h).ok_or("Failed to create pixmap")?;
+        pixmap.fill(tiny_skia::Color::WHITE);
+        resvg::render(&tree, tiny_skia::Transform::identity(), &mut pixmap.as_mut());
+        pixmap.save_png(path).map_err(|e| format!("PNG: {}", e))?;
+        Ok(())
     }
 
     pub fn select_by_id(&mut self, id: &str) {
@@ -1448,6 +1568,191 @@ impl CanvasState {
             _ => None,
         }
     }
+
+    // ─── ANNOTATE TOOL ──────────────────────────────────
+
+    fn show_annotate_tool(
+        &mut self,
+        response: &egui::Response,
+        painter: &egui::Painter,
+        cr: Rect,
+        hover: Option<Pos2>,
+        ctx: &egui::Context,
+    ) {
+        const ANNO_COLOR: Color32 = Color32::from_rgb(255, 80, 60);
+
+        // Handle text input mode
+        if self.annotation_text_editing {
+            // Consume text input events
+            ctx.input(|i| {
+                for event in &i.events {
+                    match event {
+                        egui::Event::Text(t) => {
+                            self.annotation_text_buffer.push_str(t);
+                        }
+                        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => {
+                            // Finish text annotation
+                            if let Some(start) = self.annotation_drag_start.take() {
+                                if !self.annotation_text_buffer.is_empty() {
+                                    self.annotations.push(Annotation::Text {
+                                        pos: start,
+                                        text: self.annotation_text_buffer.clone(),
+                                    });
+                                }
+                            }
+                            self.annotation_text_editing = false;
+                            self.annotation_text_buffer.clear();
+                        }
+                        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
+                            self.annotation_text_editing = false;
+                            self.annotation_text_buffer.clear();
+                            self.annotation_drag_start = None;
+                        }
+                        egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => {
+                            self.annotation_text_buffer.pop();
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
+            // Draw text cursor
+            if let Some(pos) = self.annotation_drag_start {
+                let screen_pos = self.s2s(pos, cr.min);
+                let display = format!("{}|", self.annotation_text_buffer);
+                painter.text(screen_pos, egui::Align2::LEFT_TOP, &display,
+                    egui::FontId::proportional(14.0), ANNO_COLOR);
+            }
+            return;
+        }
+
+        match self.annotation_tool {
+            AnnotationTool::Circle | AnnotationTool::Arrow => {
+                // Drag to create circle/arrow
+                if response.drag_started_by(egui::PointerButton::Primary) {
+                    if let Some(pos) = hover {
+                        self.annotation_drag_start = Some(self.s2v(pos, cr.min));
+                    }
+                }
+
+                // Preview while dragging
+                if response.dragged_by(egui::PointerButton::Primary) {
+                    if let (Some(start), Some(pos)) = (self.annotation_drag_start, hover) {
+                        let end = self.s2v(pos, cr.min);
+                        let s_start = self.s2s(start, cr.min);
+                        let s_end = self.s2s(end, cr.min);
+
+                        match self.annotation_tool {
+                            AnnotationTool::Circle => {
+                                let center = Pos2::new((s_start.x + s_end.x) / 2.0, (s_start.y + s_end.y) / 2.0);
+                                let rx = (s_end.x - s_start.x).abs() / 2.0;
+                                let ry = (s_end.y - s_start.y).abs() / 2.0;
+                                painter.circle_stroke(center, rx.max(ry), Stroke::new(2.5, ANNO_COLOR));
+                            }
+                            AnnotationTool::Arrow => {
+                                draw_arrow(painter, s_start, s_end, ANNO_COLOR, 2.5);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                // Commit on release
+                if response.drag_stopped() {
+                    if let (Some(start), Some(pos)) = (self.annotation_drag_start.take(), hover) {
+                        let end = self.s2v(pos, cr.min);
+                        match self.annotation_tool {
+                            AnnotationTool::Circle => {
+                                let cx = (start.x + end.x) / 2.0;
+                                let cy = (start.y + end.y) / 2.0;
+                                let rx = (end.x - start.x).abs() / 2.0;
+                                let ry = (end.y - start.y).abs() / 2.0;
+                                if rx > 2.0 || ry > 2.0 {
+                                    self.annotations.push(Annotation::Circle {
+                                        center: Pos2::new(cx, cy),
+                                        radius_x: rx,
+                                        radius_y: ry,
+                                    });
+                                }
+                            }
+                            AnnotationTool::Arrow => {
+                                if start.distance(end) > 5.0 {
+                                    self.annotations.push(Annotation::Arrow { start, end });
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            AnnotationTool::Text => {
+                // Click to place text, then type
+                if response.clicked() {
+                    if let Some(pos) = hover {
+                        let svp = self.s2v(pos, cr.min);
+                        self.annotation_drag_start = Some(svp);
+                        self.annotation_text_editing = true;
+                        self.annotation_text_buffer.clear();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draw all annotations (called in every tool mode).
+    fn draw_annotations(&self, painter: &egui::Painter, cr: Rect, _hover: Option<Pos2>) {
+        const ANNO_COLOR: Color32 = Color32::from_rgb(255, 80, 60);
+        const ANNO_STROKE: f32 = 2.5;
+
+        for ann in &self.annotations {
+            match ann {
+                Annotation::Circle { center, radius_x, radius_y } => {
+                    let sc = self.s2s(*center, cr.min);
+                    let srx = radius_x * self.zoom;
+                    let sry = radius_y * self.zoom;
+                    // Draw as ellipse using dashed circle (approximate with circle for now)
+                    painter.circle_stroke(sc, srx.max(sry), Stroke::new(ANNO_STROKE, ANNO_COLOR));
+                    // If significantly elliptical, draw a second inner ellipse hint
+                    if (srx - sry).abs() > 5.0 {
+                        let r = Rect::from_center_size(sc, Vec2::new(srx * 2.0, sry * 2.0));
+                        painter.rect_stroke(r, srx.min(sry), Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 80, 60, 80)));
+                    }
+                }
+                Annotation::Arrow { start, end } => {
+                    let s_start = self.s2s(*start, cr.min);
+                    let s_end = self.s2s(*end, cr.min);
+                    draw_arrow(painter, s_start, s_end, ANNO_COLOR, ANNO_STROKE);
+                }
+                Annotation::Text { pos, text } => {
+                    let sp = self.s2s(*pos, cr.min);
+                    // Background for readability
+                    let galley = painter.layout_no_wrap(text.clone(), egui::FontId::proportional(14.0), ANNO_COLOR);
+                    let text_rect = egui::Align2::LEFT_TOP.anchor_size(sp, galley.size());
+                    painter.rect_filled(text_rect.expand(3.0), 2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 180));
+                    painter.galley(sp, galley, ANNO_COLOR);
+                }
+            }
+        }
+    }
+}
+
+/// Draw an arrow line with an arrowhead.
+fn draw_arrow(painter: &egui::Painter, start: Pos2, end: Pos2, color: Color32, width: f32) {
+    painter.line_segment([start, end], Stroke::new(width, color));
+
+    // Arrowhead
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1.0 { return; }
+    let ux = dx / len;
+    let uy = dy / len;
+    let head_len = 12.0;
+    let head_width = 6.0;
+    let base = Pos2::new(end.x - ux * head_len, end.y - uy * head_len);
+    let left = Pos2::new(base.x - uy * head_width, base.y + ux * head_width);
+    let right = Pos2::new(base.x + uy * head_width, base.y - ux * head_width);
+    painter.add(egui::Shape::convex_polygon(vec![end, left, right], color, Stroke::NONE));
 }
 
 // ─── Free functions ─────────────────────────────────────

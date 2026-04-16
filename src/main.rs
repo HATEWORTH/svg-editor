@@ -1,6 +1,7 @@
 mod animation;
 mod app;
 mod canvas;
+mod feedback;
 mod layers;
 mod path_data;
 mod project;
