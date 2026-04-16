@@ -102,20 +102,19 @@ pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
         let local_t = t - anim.begin;
         if local_t < 0.0 { continue; } // not started yet
 
-        let cycle_t = match anim.repeat_count {
-            RepeatCount::Indefinite => local_t % anim.dur,
+        let progress = match anim.repeat_count {
+            RepeatCount::Indefinite => (local_t % anim.dur) / anim.dur,
             RepeatCount::Definite(n) => {
                 let total = anim.dur * n;
                 if local_t > total {
-                    if anim.fill == "freeze" { anim.dur } // stay at end
+                    if anim.fill == "freeze" { 1.0 } // freeze at final value
                     else { continue; } // remove — don't apply
                 } else {
-                    local_t % anim.dur
+                    (local_t % anim.dur) / anim.dur
                 }
             }
-        };
-
-        let progress = (cycle_t / anim.dur).clamp(0.0, 1.0);
+        }
+        .clamp(0.0, 1.0);
 
         match anim.tag.as_str() {
             "animate" => {

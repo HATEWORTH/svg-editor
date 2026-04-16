@@ -250,7 +250,7 @@ impl CanvasState {
         let p = 40.0;
         let sx = (s.x - p * 2.0) / self.svg_width;
         let sy = (s.y - p * 2.0) / self.svg_height;
-        self.zoom = sx.min(sy).min(2.0);
+        self.zoom = sx.min(sy).min(10.0);
         self.pan = Vec2::new(
             (s.x - self.svg_width * self.zoom) / 2.0,
             (s.y - self.svg_height * self.zoom) / 2.0,
@@ -852,7 +852,8 @@ impl CanvasState {
             );
         }
 
-        // Debug overlay: show node info
+        // Debug overlay: show node info (only in debug builds)
+        #[cfg(debug_assertions)]
         if let Some(ref id) = self.selected_element {
             let info = format!(
                 "id={} tag={} pts={} cmds={} dirty={}",
@@ -865,7 +866,6 @@ impl CanvasState {
                 egui::FontId::monospace(12.0),
                 Color32::YELLOW,
             );
-            // Show first few point positions
             for (i, pt) in self.node_points.iter().take(4).enumerate() {
                 let pt_info = format!("  pt{}: ({:.0},{:.0}) {:?}", i, pt.pos.x, pt.pos.y, pt.kind);
                 painter.text(
