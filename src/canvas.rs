@@ -55,6 +55,9 @@ pub struct CanvasState {
     redo_stack: Vec<String>,
     pub svg_modified: bool,
     element_bboxes: Vec<(String, Rect)>,
+    /// Length of SVG content when bboxes were last successfully computed.
+    /// Used to detect if content changed when parse fails.
+    bboxes_svg_len: usize,
     // Tool
     pub tool: EditTool,
     // Resize state
@@ -114,6 +117,7 @@ impl CanvasState {
             redo_stack: Vec::new(),
             svg_modified: false,
             element_bboxes: Vec::new(),
+            bboxes_svg_len: 0,
             tool: EditTool::Select,
             resize_anchor: Pos2::ZERO,
             resize_orig_bbox: Rect::NOTHING,
@@ -242,8 +246,9 @@ impl CanvasState {
     }
 
     fn rebuild_bboxes(&mut self) {
-        self.element_bboxes.clear();
         if self.svg_content.is_empty() {
+            self.element_bboxes.clear();
+            self.bboxes_svg_len = 0;
             return;
         }
         let opt = usvg::Options::default();
@@ -259,7 +264,14 @@ impl CanvasState {
             }
             deduped.reverse();
             self.element_bboxes = deduped;
+            self.bboxes_svg_len = self.svg_content.len();
+        } else if self.svg_content.len() != self.bboxes_svg_len {
+            // Content changed but parse failed - clear stale bboxes to avoid
+            // misaligned selection handles pointing to outdated coordinates
+            self.element_bboxes.clear();
+            self.bboxes_svg_len = 0;
         }
+        // If content unchanged and parse fails, keep previous bboxes (transient error)
     }
 
     pub fn fit_to_view(&mut self, s: Vec2) {
@@ -301,7 +313,7 @@ impl CanvasState {
         let opt = usvg::Options::default();
         let tree = match usvg::Tree::from_str(&render_svg, &opt) {
             Ok(t) => t,
-            Err(_) => return,
+            Err(_) => return, // Keep existing texture on parse failure
         };
 
         // Pixmap = canvas area at native screen resolution (DPI-aware)
