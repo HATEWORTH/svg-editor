@@ -87,10 +87,10 @@ runs:
           fi
         fi
 
-        # Fallback: count agent metadata comments
+        # Fallback: count agent metadata comments (exclude limit-reached notices)
         echo "Falling back to comment-based counting..."
         ITERATION_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-          --paginate --jq "[.[] | select(.body | contains(\"agent-metadata:type=${AGENT_TYPE}\"))] | length" \
+          --paginate --jq "[.[] | select((.body | contains(\"agent-metadata:type=${AGENT_TYPE}\")) and (.body | contains(\":limit-reached\") | not))] | length" \
           2>/dev/null || echo "0")
 
         CONTINUE_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \

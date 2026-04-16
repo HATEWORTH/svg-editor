@@ -226,8 +226,6 @@ jobs:
         shell: bash
         run: |
           echo "Max iterations reached. Manual intervention required."
-          echo "made_changes=false" >> $GITHUB_OUTPUT
-          exit 0
 
       - name: Download review artifacts
         if: steps.iteration.outputs.should_skip != 'true'
@@ -251,7 +249,12 @@ jobs:
         run: |
           if ! command -v automation-cli &>/dev/null; then
             echo "::warning::automation-cli not found on PATH - skipping review response"
-            echo "made_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check that at least one review artifact exists
+          if [ ! -f claude-security-review.md ] && [ ! -f claude-quality-review.md ] && [ ! -f openrouter-review.md ]; then
+            echo "::warning::No review artifacts found - skipping review response"
             exit 0
           fi
 
