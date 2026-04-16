@@ -426,7 +426,10 @@ impl eframe::App for ForgeApp {
         if ctx.input(|i| i.key_pressed(egui::Key::Z) && i.modifiers.command && i.modifiers.shift) {
             if self.canvas.redo() { self.unsaved = true; self.layers.refresh(&self.canvas.svg_content); self.status_msg = "Redo".into(); }
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+        if !self.canvas.is_editing_annotation_text()
+            && self.canvas.tool != EditTool::Annotate
+            && ctx.input(|i| i.key_pressed(egui::Key::Delete))
+        {
             self.canvas.delete_selected();
             self.layers.refresh(&self.canvas.svg_content);
             self.unsaved = true;

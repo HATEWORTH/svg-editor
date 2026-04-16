@@ -242,8 +242,8 @@ impl CanvasState {
     }
 
     fn rebuild_bboxes(&mut self) {
-        self.element_bboxes.clear();
         if self.svg_content.is_empty() {
+            self.element_bboxes.clear();
             return;
         }
         let opt = usvg::Options::default();
@@ -260,6 +260,7 @@ impl CanvasState {
             deduped.reverse();
             self.element_bboxes = deduped;
         }
+        // On parse failure, keep previous bboxes instead of clearing them
     }
 
     pub fn fit_to_view(&mut self, s: Vec2) {
@@ -301,7 +302,7 @@ impl CanvasState {
         let opt = usvg::Options::default();
         let tree = match usvg::Tree::from_str(&render_svg, &opt) {
             Ok(t) => t,
-            Err(_) => return,
+            Err(_) => return, // Keep existing texture on parse failure
         };
 
         // Pixmap = canvas area at native screen resolution (DPI-aware)
