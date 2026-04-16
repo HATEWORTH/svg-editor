@@ -263,6 +263,13 @@ impl ForgeApp {
     }
 
     fn recent_file_path() -> PathBuf {
+        // Use user config directory instead of exe directory
+        if let Some(config_dir) = dirs::config_dir() {
+            let app_dir = config_dir.join("svg-forge");
+            let _ = std::fs::create_dir_all(&app_dir);
+            return app_dir.join("recent-files.txt");
+        }
+        // Fallback to exe directory
         let mut p = std::env::current_exe().unwrap_or_default();
         p.pop();
         p.push("svg-forge-recent.txt");
@@ -312,11 +319,21 @@ impl ForgeApp {
         let data_url = format!("data:{};base64,{}", mime, b64);
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let layer_id = format!("layer-img-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+
+        // Try to detect image dimensions, fallback to canvas-relative size
+        let (w, h) = detect_image_size(&data).unwrap_or_else(|| {
+            // Default to half the canvas size, centered
+            ((self.canvas.svg_width * 0.5) as u32, (self.canvas.svg_height * 0.5) as u32)
+        });
+        // Center the image on the canvas
+        let x = ((self.canvas.svg_width - w as f32) / 2.0).max(0.0) as u32;
+        let y = ((self.canvas.svg_height - h as f32) / 2.0).max(0.0) as u32;
+
         let el = format!(
             r##"  <g id="{}" forge:name="{}" forge:visible="true" forge:locked="false" forge:order="99">
-    <image href="{}" x="100" y="100" width="400" height="300"/>
+    <image href="{}" x="{}" y="{}" width="{}" height="{}"/>
   </g>
-"##, layer_id, name, data_url);
+"##, layer_id, name, data_url, x, y, w, h);
         if let Some(pos) = self.canvas.svg_content.rfind("</svg>") {
             let mut new_svg = self.canvas.svg_content.clone();
             new_svg.insert_str(pos, &el);
@@ -446,6 +463,7 @@ impl eframe::App for ForgeApp {
                         ui.close_menu();
                         self.canvas.selected_element = None;
                         self.canvas.selected_bbox = None;
+                        self.layers.selected_id = None;
                     }
                 });
 
@@ -577,6 +595,45 @@ impl eframe::App for ForgeApp {
                 self.canvas.show(ui, ctx);
             });
     }
+}
+
+/// Detect image dimensions from file header bytes (PNG, JPEG, GIF, BMP, WebP).
+fn detect_image_size(data: &[u8]) -> Option<(u32, u32)> {
+    if data.len() < 30 { return None; }
+    // PNG: bytes 16-23 contain width and height as big-endian u32
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") && data.len() >= 24 {
+        let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
+        let h = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+        return Some((w, h));
+    }
+    // GIF: bytes 6-9 contain width and height as little-endian u16
+    if data.starts_with(b"GIF8") && data.len() >= 10 {
+        let w = u16::from_le_bytes([data[6], data[7]]) as u32;
+        let h = u16::from_le_bytes([data[8], data[9]]) as u32;
+        return Some((w, h));
+    }
+    // BMP: bytes 18-25 contain width and height as little-endian i32
+    if data.starts_with(b"BM") && data.len() >= 26 {
+        let w = i32::from_le_bytes([data[18], data[19], data[20], data[21]]).unsigned_abs();
+        let h = i32::from_le_bytes([data[22], data[23], data[24], data[25]]).unsigned_abs();
+        return Some((w, h));
+    }
+    // JPEG: scan for SOF0/SOF2 marker
+    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
+        let mut i = 2;
+        while i + 9 < data.len() {
+            if data[i] != 0xFF { i += 1; continue; }
+            let marker = data[i + 1];
+            if marker == 0xC0 || marker == 0xC2 {
+                let h = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
+                let w = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
+                return Some((w, h));
+            }
+            let seg_len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
+            i += 2 + seg_len;
+        }
+    }
+    None
 }
 
 fn base64_encode(data: &[u8]) -> String {

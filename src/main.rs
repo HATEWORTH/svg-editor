@@ -32,8 +32,17 @@ fn main() {
         .canonicalize()
         .unwrap_or_else(|_| {
             let p = PathBuf::from(&cli.project_dir);
-            std::fs::create_dir_all(&p).expect("Failed to create project directory");
-            p.canonicalize().expect("Failed to resolve project directory")
+            if let Err(e) = std::fs::create_dir_all(&p) {
+                eprintln!("Failed to create project directory: {}", e);
+                std::process::exit(1);
+            }
+            match p.canonicalize() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to resolve project directory: {}", e);
+                    std::process::exit(1);
+                }
+            }
         });
 
     // Handle --new flag
