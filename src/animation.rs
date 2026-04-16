@@ -179,7 +179,7 @@ pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
                 result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
             } else {
                 // Append animated transforms to preserve static base positioning
-                let full_transform = format!("{} {}", existing, combined);
+                let full_transform = format!("{} {}", trimmed, combined);
                 result = crate::svg_edit::set_attribute(&result, id, "transform", &full_transform);
             }
         } else {
