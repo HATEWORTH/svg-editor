@@ -10,8 +10,8 @@ enabled_agents:
 # Agent priorities for different task types
 agent_priorities:
   pr_reviews:
-    - claude       # Primary reviewer (security + quality profiles)
-    - openrouter   # Secondary reviewer (general profile)
+    - openrouter   # Design review (Head of Design, qwen) + general review
+    - claude       # Quality/architecture review
   code_fixes:
     - claude       # Most capable for automated fixes
 

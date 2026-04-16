@@ -58,20 +58,22 @@ jobs:
   # AGENT COUNCIL -- Parallel AI Reviews
   # -------------------------------------------------------------------------
 
-  # Claude Security Review
-  claude-security-review:
-    name: Claude Security Review
+  # Qwen Design Review (Head of Design)
+  design-review:
+    name: Design Review
     needs: fork-guard
     if: >-
       github.event_name == 'pull_request' &&
       !github.event.pull_request.draft
     runs-on: self-hosted
-    timeout-minutes: 30
+    timeout-minutes: 20
+    continue-on-error: true
     outputs:
       review_status: ${{ steps.review-action.outputs.review_status }}
       review_artifact_name: ${{ steps.review-action.outputs.review_artifact_name }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Fix PATH for Git Bash
         shell: cmd
@@ -88,12 +90,12 @@ jobs:
           clean: true
           ref: ${{ github.head_ref }}
 
-      - name: Run Claude security review
+      - name: Run design review
         id: review-action
-        uses: ./.github/actions/claude-review
+        uses: ./.github/actions/openrouter-review
         with:
           pr_number: ${{ github.event.pull_request.number }}
-          profile: 'security'
+          profile: 'design'
 
   # Claude Quality Review
   claude-quality-review:
@@ -176,7 +178,7 @@ jobs:
   # -------------------------------------------------------------------------
   agent-review-response:
     name: Agent Review Response
-    needs: [ci, claude-security-review, claude-quality-review, openrouter-review]
+    needs: [ci, design-review, claude-quality-review, openrouter-review]
     if: |
       always() &&
       !cancelled() &&
@@ -241,7 +243,7 @@ jobs:
         if: steps.iteration.outputs.should_skip != 'true'
         shell: bash
         env:
-          CLAUDE_SECURITY_REVIEW_PATH: claude-security-review.md
+          DESIGN_REVIEW_PATH: openrouter-review.md
           CLAUDE_QUALITY_REVIEW_PATH: claude-quality-review.md
           OPENROUTER_REVIEW_PATH: openrouter-review.md
           BRANCH_NAME: ${{ github.head_ref }}
@@ -253,7 +255,7 @@ jobs:
           fi
 
           # Check that at least one review artifact exists
-          if [ ! -f claude-security-review.md ] && [ ! -f claude-quality-review.md ] && [ ! -f openrouter-review.md ]; then
+          if [ ! -f claude-quality-review.md ] && [ ! -f openrouter-review.md ]; then
             echo "::warning::No review artifacts found - skipping review response"
             exit 0
           fi
@@ -269,7 +271,7 @@ jobs:
   # -------------------------------------------------------------------------
   agent-failure-handler:
     name: Agent Failure Handler
-    needs: [ci, claude-security-review, claude-quality-review, openrouter-review, agent-review-response]
+    needs: [ci, design-review, claude-quality-review, openrouter-review, agent-review-response]
     if: |
       failure() &&
       github.event_name == 'pull_request' &&
@@ -346,7 +348,7 @@ jobs:
   # -------------------------------------------------------------------------
   pr-status:
     name: PR Status Summary
-    needs: [ci, claude-security-review, claude-quality-review, openrouter-review, agent-review-response, agent-failure-handler]
+    needs: [ci, design-review, claude-quality-review, openrouter-review, agent-review-response, agent-failure-handler]
     if: always()
     runs-on: self-hosted
     steps:
@@ -364,7 +366,7 @@ jobs:
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| CI | ${{ needs.ci.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Claude Security Review | ${{ needs.claude-security-review.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Design Review | ${{ needs.design-review.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Claude Quality Review | ${{ needs.claude-quality-review.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| OpenRouter Review | ${{ needs.openrouter-review.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Review Response | ${{ needs.agent-review-response.result }} |" >> $GITHUB_STEP_SUMMARY
