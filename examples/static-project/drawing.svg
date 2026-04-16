@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:forge="https://svgforge.dev/ns"
+     viewBox="0 0 1920 1080" forge:mode="static" forge:version="1">
+  <g id="layer-bg" forge:name="Background" forge:visible="true" forge:locked="false" forge:order="0">
+    <rect width="1920" height="1080" fill="#1a1a2e"/>
+  </g>
+  <g id="layer-shapes" forge:name="Shapes" forge:visible="true" forge:locked="false" forge:order="1">
+    <rect x="760" y="340" width="400" height="400" rx="20" fill="#e94560"/>
+    <circle cx="960" cy="540" r="120" fill="#0f3460"/>
+    <path d="M 960 420 L 1040 580 L 880 580 Z" fill="#16213e"/>
+  </g>
+  <g id="layer-text" forge:name="Text" forge:visible="true" forge:locked="false" forge:order="2">
+    <text x="960" y="900" text-anchor="middle" font-family="sans-serif" font-size="48" fill="#e0e0e0">SVG Forge</text>
+    <text x="960" y="950" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#666">Collaborative SVG Editor</text>
+  </g>
+</svg>

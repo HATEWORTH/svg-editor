@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:forge="https://svgforge.dev/ns"
+     viewBox="0 0 1920 1080" forge:mode="animated" forge:version="1">
+  <g id="layer-bg" forge:name="Background" forge:visible="true" forge:locked="true" forge:order="0">
+    <rect width="1920" height="1080" fill="#0a0a23"/>
+    <circle cx="200" cy="150" r="3" fill="white" opacity="0.6">
+      <animate attributeName="opacity" from="0.2" to="1" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="500" cy="80" r="2" fill="white" opacity="0.4">
+      <animate attributeName="opacity" from="0.1" to="0.8" dur="3s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="1400" cy="200" r="3" fill="white" opacity="0.7">
+      <animate attributeName="opacity" from="0.3" to="1" dur="1.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="1700" cy="120" r="2" fill="white" opacity="0.5">
+      <animate attributeName="opacity" from="0.2" to="0.9" dur="2.5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+  <g id="layer-moon" forge:name="Moon" forge:visible="true" forge:locked="false" forge:order="1">
+    <circle cx="1600" cy="200" r="80" fill="#f0e68c"/>
+    <circle cx="1570" cy="180" r="70" fill="#0a0a23"/>
+  </g>
+  <g id="layer-ground" forge:name="Ground" forge:visible="true" forge:locked="false" forge:order="2">
+    <path d="M 0 800 Q 480 700 960 780 Q 1440 860 1920 750 L 1920 1080 L 0 1080 Z" fill="#1a3a1a"/>
+  </g>
+  <g id="layer-character" forge:name="Character" forge:visible="true" forge:locked="false" forge:order="3">
+    <circle id="char-body" cx="300" cy="720" r="40" fill="#e94560">
+      <animateTransform attributeName="transform" type="translate"
+        from="0 0" to="1320 0" dur="5s" repeatCount="indefinite"/>
+    </circle>
+    <circle id="char-eye" cx="315" cy="710" r="8" fill="white">
+      <animateTransform attributeName="transform" type="translate"
+        from="0 0" to="1320 0" dur="5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="319" cy="710" r="4" fill="#0a0a23">
+      <animateTransform attributeName="transform" type="translate"
+        from="0 0" to="1320 0" dur="5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
