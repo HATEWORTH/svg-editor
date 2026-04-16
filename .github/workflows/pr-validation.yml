@@ -16,11 +16,6 @@ concurrency:
   group: pr-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
-# Force Git Bash on Windows self-hosted runners (prevents WSL bash interception)
-defaults:
-  run:
-    shell: bash
-
 jobs:
   # Block fork PRs from self-hosted runners (security)
   fork-guard:
@@ -42,12 +37,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Fix PATH for Git Bash
-        shell: powershell
+        shell: cmd
         run: |
-          $gitBash = "C:\Program Files\Git\bin"
-          $localBin = "$env:USERPROFILE\.local\bin"
-          echo "$gitBash" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "$localBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
 
       - uses: actions/checkout@v4
         with:
@@ -55,6 +48,7 @@ jobs:
           ref: ${{ github.head_ref }}
 
       - name: Build and test
+        shell: bash
         run: cargo build --release
 
   # -------------------------------------------------------------------------
@@ -77,12 +71,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Fix PATH for Git Bash
-        shell: powershell
+        shell: cmd
         run: |
-          $gitBash = "C:\Program Files\Git\bin"
-          $localBin = "$env:USERPROFILE\.local\bin"
-          echo "$gitBash" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "$localBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
 
       - uses: actions/checkout@v4
         with:
@@ -113,12 +105,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Fix PATH for Git Bash
-        shell: powershell
+        shell: cmd
         run: |
-          $gitBash = "C:\Program Files\Git\bin"
-          $localBin = "$env:USERPROFILE\.local\bin"
-          echo "$gitBash" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "$localBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
 
       - uses: actions/checkout@v4
         with:
@@ -151,12 +141,10 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Fix PATH for Git Bash
-        shell: powershell
+        shell: cmd
         run: |
-          $gitBash = "C:\Program Files\Git\bin"
-          $localBin = "$env:USERPROFILE\.local\bin"
-          echo "$gitBash" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "$localBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
 
       - uses: actions/checkout@v4
         with:
@@ -191,12 +179,10 @@ jobs:
       GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
       - name: Fix PATH for Git Bash
-        shell: powershell
+        shell: cmd
         run: |
-          $gitBash = "C:\Program Files\Git\bin"
-          $localBin = "$env:USERPROFILE\.local\bin"
-          echo "$gitBash" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "$localBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
 
       - uses: actions/checkout@v4
         with:
@@ -206,6 +192,7 @@ jobs:
           ref: ${{ github.head_ref }}
 
       - name: Clean working directory
+        shell: bash
         run: |
           git checkout -- . 2>/dev/null || true
           git clean -fd 2>/dev/null || true
@@ -221,6 +208,7 @@ jobs:
 
       - name: Skip if max iterations reached
         if: steps.iteration.outputs.exceeded_max == 'true'
+        shell: bash
         run: |
           echo "Max iterations reached. Manual intervention required."
           echo "made_changes=false" >> $GITHUB_OUTPUT
@@ -238,6 +226,7 @@ jobs:
       - name: Run agent review response
         id: agent-fix
         if: steps.iteration.outputs.should_skip != 'true'
+        shell: bash
         env:
           CLAUDE_SECURITY_REVIEW_PATH: claude-security-review.md
           CLAUDE_QUALITY_REVIEW_PATH: claude-quality-review.md
@@ -277,12 +266,10 @@ jobs:
       GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
       - name: Fix PATH for Git Bash
-        shell: powershell
+        shell: cmd
         run: |
-          $gitBash = "C:\Program Files\Git\bin"
-          $localBin = "$env:USERPROFILE\.local\bin"
-          echo "$gitBash" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "$localBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
 
       - uses: actions/checkout@v4
         with:
@@ -292,6 +279,7 @@ jobs:
           ref: ${{ github.head_ref }}
 
       - name: Clean working directory
+        shell: bash
         run: |
           git checkout -- . 2>/dev/null || true
           git clean -fd 2>/dev/null || true
@@ -307,6 +295,7 @@ jobs:
 
       - name: Skip if max iterations reached
         if: steps.iteration.outputs.exceeded_max == 'true'
+        shell: bash
         run: |
           echo "Max iterations reached. Manual intervention required."
           exit 0
@@ -314,6 +303,7 @@ jobs:
       - name: Run agent failure handler
         id: agent-fix
         if: steps.iteration.outputs.exceeded_max != 'true'
+        shell: bash
         env:
           BRANCH_NAME: ${{ github.head_ref }}
           ITERATION_COUNT: ${{ steps.iteration.outputs.iteration_count }}
@@ -341,11 +331,12 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Fix PATH for Git Bash
-        shell: powershell
+        shell: cmd
         run: |
-          echo "C:\Program Files\Git\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
 
       - name: Generate status summary
+        shell: bash
         run: |
           echo "## PR Validation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
