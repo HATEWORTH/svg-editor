@@ -58,16 +58,88 @@ pub fn auto_assign_ids(svg: &str) -> String {
             continue;
         }
 
+        // Generate a descriptive ID from the tag and key attributes
+        let tag_name = tag.trim_start_matches('<').trim();
+        let opening_str = result[pos..=tag_end].to_string();
+        let desc = generate_element_id(tag_name, &opening_str, counter);
+        counter += 1;
+
         // Insert id after the tag name
         let insert_pos = pos + tag.trim_end().len();
-        let id = format!("forge-{}", counter);
-        counter += 1;
-        let insertion = format!(" id=\"{}\"", id);
+        let insertion = format!(" id=\"{}\"", desc);
         result.insert_str(insert_pos, &insertion);
         search_from = insert_pos + insertion.len();
     }
 
     result
+}
+
+/// Generate a descriptive element ID from tag name and attributes.
+/// Produces IDs like "red-rect-0", "blue-circle-1", "text-hello-2".
+fn generate_element_id(tag_name: &str, opening_tag: &str, counter: u32) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+
+    // Extract fill color for a prefix
+    let color = extract_attr_value(opening_tag, "fill");
+    if let Some(ref c) = color {
+        if c != "none" {
+            let name = quick_color_label(c);
+            if !name.is_empty() {
+                parts.push(Box::leak(name.into_boxed_str()));
+            }
+        }
+    }
+
+    // Tag name
+    parts.push(tag_name);
+
+    // For text elements, try to grab text content (not in opening tag, so skip)
+    // The layer panel will handle display names via describe_element
+
+    let base = if parts.is_empty() {
+        format!("el-{}", counter)
+    } else {
+        format!("{}-{}", parts.join("-"), counter)
+    };
+
+    // Sanitize: IDs can't have spaces, must be valid XML
+    base.replace(' ', "-").to_lowercase()
+}
+
+/// Quick color label from a color string (for ID generation).
+fn quick_color_label(color: &str) -> String {
+    let c = color.trim().to_lowercase();
+    // Named colors
+    for name in &["red", "blue", "green", "yellow", "orange", "purple", "pink",
+                   "cyan", "white", "black", "gray", "brown", "navy", "teal", "gold"] {
+        if c == *name { return name.to_string(); }
+    }
+    // Hex colors — approximate
+    if c.starts_with('#') && c.len() >= 7 {
+        let r = u8::from_str_radix(&c[1..3], 16).unwrap_or(128);
+        let g = u8::from_str_radix(&c[3..5], 16).unwrap_or(128);
+        let b = u8::from_str_radix(&c[5..7], 16).unwrap_or(128);
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        if max < 30 { return "black".into(); }
+        if min > 225 { return "white".into(); }
+        if max - min < 25 { return "gray".into(); }
+        if r > g + 50 && r > b + 50 { return "red".into(); }
+        if g > r + 50 && g > b + 50 { return "green".into(); }
+        if b > r + 50 && b > g + 50 { return "blue".into(); }
+        if r > 200 && g > 200 && b < 100 { return "yellow".into(); }
+        if r > 200 && g > 100 && b < 80 { return "orange".into(); }
+    }
+    String::new()
+}
+
+/// Extract an attribute value from a raw opening tag string.
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let pattern = format!("{}=\"", attr);
+    let start = tag.find(&pattern)?;
+    let val_start = start + pattern.len();
+    let val_end = tag[val_start..].find('"')?;
+    Some(tag[val_start..val_start + val_end].to_string())
 }
 
 /// Set or update an attribute on an element found by ID.
