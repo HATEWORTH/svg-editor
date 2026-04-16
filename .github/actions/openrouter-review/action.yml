@@ -77,10 +77,10 @@ runs:
         EXIT_CODE=$?
         set -e
 
-        echo "$OUTPUT"
+        printf '%s\n' "$OUTPUT"
 
         # Save review to file for artifact upload
-        echo "$OUTPUT" > openrouter-review.md
+        printf '%s\n' "$OUTPUT" > openrouter-review.md
         echo "Saved review to openrouter-review.md"
 
         # Handle transient API errors gracefully

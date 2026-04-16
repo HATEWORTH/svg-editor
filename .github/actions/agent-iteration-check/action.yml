@@ -93,9 +93,23 @@ runs:
           --paginate --jq "[.[] | select((.body | contains(\"agent-metadata:type=${AGENT_TYPE}\")) and (.body | contains(\":limit-reached\") | not))] | length" \
           2>/dev/null || echo "0")
 
-        CONTINUE_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-          --paginate --jq '[.[] | select(.body | test("\\[CONTINUE\\]"))] | length' \
-          2>/dev/null || echo "0")
+        # Parse admin list from .agents.yaml (fallback to empty if not found)
+        ADMIN_LIST=""
+        if [ -f ".agents.yaml" ]; then
+          # Extract agent_admins list entries (lines starting with "    - " under agent_admins:)
+          ADMIN_LIST=$(awk '/^  agent_admins:/{found=1; next} /^  [a-z]/{found=0} found && /^    - /{gsub(/^    - /, ""); print}' .agents.yaml | tr '\n' '|' | sed 's/|$//')
+        fi
+        echo "Parsed admin list: $ADMIN_LIST"
+
+        # Count [CONTINUE] comments only from authorized admins
+        if [ -n "$ADMIN_LIST" ]; then
+          CONTINUE_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --paginate --jq "[.[] | select((.body | test(\"\\\\[CONTINUE\\\\]\")) and (.user.login | test(\"^($ADMIN_LIST)\$\")))] | length" \
+            2>/dev/null || echo "0")
+        else
+          # No admins configured - don't count any [CONTINUE] comments
+          CONTINUE_COUNT="0"
+        fi
 
         EFFECTIVE_MAX=$(( MAX_ITERATIONS + CONTINUE_COUNT * MAX_ITERATIONS ))
         EXCEEDED_MAX="false"

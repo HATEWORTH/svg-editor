@@ -72,10 +72,10 @@ runs:
         EXIT_CODE=$?
         set -e
 
-        echo "$OUTPUT"
+        printf '%s\n' "$OUTPUT"
 
         # Save review to file for artifact upload
-        echo "$OUTPUT" > claude-${REVIEW_PROFILE}-review.md
+        printf '%s\n' "$OUTPUT" > claude-${REVIEW_PROFILE}-review.md
         echo "Saved review to claude-${REVIEW_PROFILE}-review.md"
 
         # Handle transient API errors gracefully

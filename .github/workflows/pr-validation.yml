@@ -331,7 +331,6 @@ jobs:
         run: |
           if ! command -v automation-cli &>/dev/null; then
             echo "::warning::automation-cli not found on PATH - skipping failure handler"
-            echo "made_changes=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
