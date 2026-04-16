@@ -13,6 +13,8 @@ const ACCENT: Color32 = Color32::from_rgb(79, 195, 247);
 const ACCENT_DIM: Color32 = Color32::from_rgb(79, 195, 247);
 const CTRL_COLOR: Color32 = Color32::from_rgb(255, 167, 38);
 const HANDLE_LINE: Color32 = Color32::from_rgba_premultiplied(255, 167, 38, 140);
+/// Animation render throttle interval in milliseconds (~30fps).
+const ANIM_RENDER_THROTTLE_MS: u128 = 33;
 
 /// Cached shape attributes for non-path element node editing.
 #[derive(Clone, Default)]
@@ -87,6 +89,7 @@ pub struct CanvasState {
     pub anim_duration: f64,
     pub anim_playing: bool,
     anim_last_instant: Option<std::time::Instant>,
+    anim_last_render: Option<std::time::Instant>,
     // Multi-select
     pub selected_elements: Vec<String>,
     // Annotations (drawn on top of SVG, not part of SVG file)
@@ -145,6 +148,7 @@ impl CanvasState {
             anim_duration: 0.0,
             anim_playing: false,
             anim_last_instant: None,
+            anim_last_render: None,
             selected_elements: Vec::new(),
             annotations: Vec::new(),
             annotation_tool: AnnotationTool::Circle,
@@ -367,22 +371,19 @@ impl CanvasState {
 
         resvg::render(&tree, tf, &mut px.as_mut());
 
-        // Convert tiny-skia premultiplied RGBA to egui straight RGBA
-        let d = px.data();
-        let mut rgba = Vec::with_capacity(d.len());
-        for c in d.chunks(4) {
-            let a = c[3] as f32 / 255.0;
-            if a > 0.0 {
-                rgba.extend_from_slice(&[
-                    (c[0] as f32 / a).min(255.0) as u8,
-                    (c[1] as f32 / a).min(255.0) as u8,
-                    (c[2] as f32 / a).min(255.0) as u8,
-                    c[3],
-                ]);
-            } else {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
+        // Convert tiny-skia premultiplied RGBA to egui straight RGBA (optimized)
+        let d = px.data_mut();
+        for c in d.chunks_exact_mut(4) {
+            let a = c[3];
+            if a > 0 && a < 255 {
+                let inv_a = 255.0 / a as f32;
+                c[0] = (c[0] as f32 * inv_a).min(255.0) as u8;
+                c[1] = (c[1] as f32 * inv_a).min(255.0) as u8;
+                c[2] = (c[2] as f32 * inv_a).min(255.0) as u8;
             }
+            // a == 0: leave as [0,0,0,0]; a == 255: already straight
         }
+        let rgba = d;
         let img = egui::ColorImage::from_rgba_unmultiplied([rw as usize, rh as usize], &rgba);
         self.texture = Some(ctx.load_texture("svg-canvas", img, egui::TextureOptions::LINEAR));
     }
@@ -398,7 +399,12 @@ impl CanvasState {
             if self.anim_duration > 0.0 && self.anim_time > self.anim_duration {
                 self.anim_time = self.anim_time % self.anim_duration;
             }
-            self.texture_dirty = true;
+            // Throttle rendering to avoid expensive re-parse every frame
+            let since_render = now.duration_since(self.anim_last_render.unwrap_or(now));
+            if since_render.as_millis() >= ANIM_RENDER_THROTTLE_MS || self.anim_last_render.is_none() {
+                self.texture_dirty = true;
+                self.anim_last_render = Some(now);
+            }
         }
         self.anim_last_instant = Some(now);
         true

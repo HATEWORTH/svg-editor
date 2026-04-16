@@ -277,25 +277,30 @@ pub fn set_translate(svg: &str, element_id: &str, tx: f32, ty: f32) -> String {
 }
 
 /// Set visibility (display) on an element.
+/// Uses the `visibility` CSS property instead of `display:none` so that
+/// hidden elements still occupy space and don't affect layout of siblings.
 pub fn set_visibility(svg: &str, element_id: &str, visible: bool) -> String {
     if visible {
-        // Remove display:none if present
+        // Remove visibility:hidden and display:none if present
         let style = get_attribute(svg, element_id, "style").unwrap_or_default();
-        if style.contains("display:none") || style.contains("display: none") {
-            let new_style = style
-                .replace("display:none", "")
-                .replace("display: none", "")
-                .replace(";;", ";")
-                .trim_matches(';')
-                .to_string();
-            if new_style.is_empty() {
-                // Remove the style attribute entirely - just set it empty for now
-                set_attribute(svg, element_id, "style", "")
-            } else {
-                set_attribute(svg, element_id, "style", &new_style)
-            }
+        // Split by semicolon, filter out display/visibility properties and empty parts, rejoin
+        let new_style: String = style
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| {
+                !s.is_empty()
+                    && !s.starts_with("display:none")
+                    && !s.starts_with("display: none")
+                    && !s.starts_with("visibility:hidden")
+                    && !s.starts_with("visibility: hidden")
+            })
+            .collect::<Vec<_>>()
+            .join(";");
+        if new_style.is_empty() {
+            // Remove the style attribute entirely
+            remove_attribute(svg, element_id, "style")
         } else {
-            svg.to_string()
+            set_attribute(svg, element_id, "style", &new_style)
         }
     } else {
         let style = get_attribute(svg, element_id, "style").unwrap_or_default();
@@ -307,6 +312,42 @@ pub fn set_visibility(svg: &str, element_id: &str, visible: bool) -> String {
             svg.to_string()
         }
     }
+}
+
+/// Remove an attribute entirely from an element.
+pub fn remove_attribute(svg: &str, element_id: &str, attr_name: &str) -> String {
+    let id_pattern = format!("id=\"{}\"", element_id);
+    let id_pos = match svg.find(&id_pattern) {
+        Some(p) => p,
+        None => return svg.to_string(),
+    };
+    let tag_start = match svg[..id_pos].rfind('<') {
+        Some(p) => p,
+        None => return svg.to_string(),
+    };
+    let tag_end = match svg[tag_start..].find('>') {
+        Some(p) => tag_start + p,
+        None => return svg.to_string(),
+    };
+    let opening_tag = &svg[tag_start..=tag_end];
+
+    // Find the attribute in the opening tag
+    let attr_pattern = format!("{}=\"", attr_name);
+    if let Some(rel_start) = opening_tag.find(&attr_pattern) {
+        let abs_start = tag_start + rel_start;
+        let val_start = abs_start + attr_pattern.len();
+        if let Some(val_end_rel) = svg[val_start..].find('"') {
+            let abs_end = val_start + val_end_rel + 1; // include closing quote
+            // Remove the attribute and any leading whitespace
+            let remove_start = if abs_start > 0 && svg.as_bytes()[abs_start - 1] == b' ' {
+                abs_start - 1
+            } else {
+                abs_start
+            };
+            return format!("{}{}", &svg[..remove_start], &svg[abs_end..]);
+        }
+    }
+    svg.to_string()
 }
 
 /// Set the forge:visible attribute.
