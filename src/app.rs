@@ -629,7 +629,10 @@ fn detect_image_size(data: &[u8]) -> Option<(u32, u32)> {
                 let w = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
                 return Some((w, h));
             }
+            // Skip to next marker; segment length includes the 2-byte length field itself
+            if i + 3 >= data.len() { break; }
             let seg_len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
+            if seg_len < 2 { break; } // Invalid segment, abort
             i += 2 + seg_len;
         }
     }
