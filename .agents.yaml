@@ -84,5 +84,8 @@ advanced:
   max_retries: 2
   retry_delay_seconds: 5
   isolate_environment: true
+  # Safe in CI: agents run on self-hosted runner with no interactive terminal.
+  # --dangerously-skip-permissions auto-approves tool use since all prompts
+  # are pre-approved via .agents.yaml and the runner is sandboxed.
   non_interactive_flags:
     claude: ["--print", "--dangerously-skip-permissions"]

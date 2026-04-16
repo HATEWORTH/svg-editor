@@ -36,7 +36,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 30
     steps:
-      - name: Fix PATH for Git Bash
+      - name: Setup runner environment
         shell: cmd
         run: |
           echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
@@ -75,7 +75,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
-      - name: Fix PATH for Git Bash
+      - name: Setup runner environment
         shell: cmd
         run: |
           echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
@@ -112,7 +112,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Fix PATH for Git Bash
+      - name: Setup runner environment
         shell: cmd
         run: |
           echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
@@ -151,7 +151,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
-      - name: Fix PATH for Git Bash
+      - name: Setup runner environment
         shell: cmd
         run: |
           echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
@@ -192,7 +192,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
-      - name: Fix PATH for Git Bash
+      - name: Setup runner environment
         shell: cmd
         run: |
           echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
@@ -285,7 +285,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
-      - name: Fix PATH for Git Bash
+      - name: Setup runner environment
         shell: cmd
         run: |
           echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
@@ -352,7 +352,7 @@ jobs:
     if: always()
     runs-on: self-hosted
     steps:
-      - name: Fix PATH for Git Bash
+      - name: Setup runner environment
         shell: cmd
         run: |
           echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
