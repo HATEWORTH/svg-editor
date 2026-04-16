@@ -766,8 +766,8 @@ impl eframe::App for ForgeApp {
                         ];
                         for (key, action) in &shortcuts {
                             ui.horizontal(|ui: &mut egui::Ui| {
-                                ui.colored_label(key_color, egui::RichText::new(*key).monospace().size(10.0));
-                                ui.colored_label(dim, egui::RichText::new(*action).size(10.0));
+                                ui.colored_label(key_color, egui::RichText::new(*key).monospace().size(11.0));
+                                ui.colored_label(dim, egui::RichText::new(*action).size(11.0));
                             });
                         }
                     });

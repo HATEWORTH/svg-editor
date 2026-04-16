@@ -281,7 +281,9 @@ impl CanvasState {
         if !self.texture_dirty && self.texture.is_some() {
             return;
         }
-        // Skip re-render if canvas rect is too small (e.g. dialog overlay covering canvas)
+        // Skip re-render if canvas rect is too small (e.g. dialog overlay covering canvas).
+        // This prevents SVG stretching when dialogs reduce available space. We intentionally
+        // leave texture_dirty=true so rendering resumes when the dialog closes and space returns.
         if canvas_rect.width() < 100.0 || canvas_rect.height() < 100.0 {
             return;
         }
