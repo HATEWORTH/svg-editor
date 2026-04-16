@@ -308,7 +308,7 @@ impl CanvasState {
         let p = 40.0;
         let sx = (s.x - p * 2.0) / self.svg_width;
         let sy = (s.y - p * 2.0) / self.svg_height;
-        self.zoom = sx.min(sy).max(0.01); // No upper cap, but enforce 0.01 minimum
+        self.zoom = sx.min(sy).clamp(0.01, 50.0); // Match scroll handler's zoom range
         self.pan = Vec2::new(
             (s.x - self.svg_width * self.zoom) / 2.0,
             (s.y - self.svg_height * self.zoom) / 2.0,
