@@ -13,6 +13,8 @@ const ACCENT: Color32 = Color32::from_rgb(79, 195, 247);
 const ACCENT_DIM: Color32 = Color32::from_rgb(79, 195, 247);
 const CTRL_COLOR: Color32 = Color32::from_rgb(255, 167, 38);
 const HANDLE_LINE: Color32 = Color32::from_rgba_premultiplied(255, 167, 38, 140);
+/// Animation render throttle interval in milliseconds (~30fps).
+const ANIM_RENDER_THROTTLE_MS: u128 = 33;
 
 /// Cached shape attributes for non-path element node editing.
 #[derive(Clone, Default)]
@@ -397,9 +399,9 @@ impl CanvasState {
             if self.anim_duration > 0.0 && self.anim_time > self.anim_duration {
                 self.anim_time = self.anim_time % self.anim_duration;
             }
-            // Throttle rendering to ~30fps to avoid expensive re-parse every frame
+            // Throttle rendering to avoid expensive re-parse every frame
             let since_render = now.duration_since(self.anim_last_render.unwrap_or(now));
-            if since_render.as_millis() >= 33 || self.anim_last_render.is_none() {
+            if since_render.as_millis() >= ANIM_RENDER_THROTTLE_MS || self.anim_last_render.is_none() {
                 self.texture_dirty = true;
                 self.anim_last_render = Some(now);
             }

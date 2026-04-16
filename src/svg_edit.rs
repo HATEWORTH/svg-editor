@@ -283,18 +283,21 @@ pub fn set_visibility(svg: &str, element_id: &str, visible: bool) -> String {
     if visible {
         // Remove visibility:hidden and display:none if present
         let style = get_attribute(svg, element_id, "style").unwrap_or_default();
-        let new_style = style
-            .replace("display:none", "")
-            .replace("display: none", "")
-            .replace("visibility:hidden", "")
-            .replace("visibility: hidden", "")
-            .replace(";;", ";")
-            .trim_matches(';')
-            .trim()
-            .to_string();
+        // Split by semicolon, filter out display/visibility properties and empty parts, rejoin
+        let new_style: String = style
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| {
+                !s.is_empty()
+                    && !s.starts_with("display:none")
+                    && !s.starts_with("display: none")
+                    && !s.starts_with("visibility:hidden")
+                    && !s.starts_with("visibility: hidden")
+            })
+            .collect::<Vec<_>>()
+            .join(";");
         if new_style.is_empty() {
-            // Remove the style attribute by setting it empty
-            // (set_attribute will write style="" which is harmless)
+            // Remove the style attribute entirely
             remove_attribute(svg, element_id, "style")
         } else {
             set_attribute(svg, element_id, "style", &new_style)
