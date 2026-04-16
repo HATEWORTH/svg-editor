@@ -35,7 +35,7 @@ pub fn parse_animations(svg: &str) -> Vec<SmilAnimation> {
     };
 
     let mut anims = Vec::new();
-    parse_node_animations(&doc.root(), &mut anims, "", svg);
+    parse_node_animations(&doc.root(), &mut anims, "");
     anims
 }
 
@@ -43,7 +43,6 @@ fn parse_node_animations(
     node: &roxmltree::Node,
     anims: &mut Vec<SmilAnimation>,
     parent_id: &str,
-    _svg: &str,
 ) {
     for child in node.children() {
         if !child.is_element() { continue; }
@@ -61,15 +60,12 @@ fn parse_node_animations(
         match tag {
             "animate" | "animateTransform" | "animateMotion" | "set" => {
                 // The parent of this animation element is the target
-                let target_id = if !parent_id.is_empty() {
-                    parent_id.to_string()
-                } else {
-                    // Parent has no ID — check if we can assign one
-                    // This handles <g> elements without IDs that contain animations
-                    String::new()
-                };
+                // Note: auto_assign_ids() runs before parsing, so all animatable elements should have IDs
+                if parent_id.is_empty() {
+                    continue; // Can't animate without a target ID
+                }
 
-                if target_id.is_empty() { continue; } // Can't animate without a target
+                let target_id = parent_id.to_string();
 
                 let key_times: Vec<f64> = child.attribute("keyTimes")
                     .map(|v| v.split(';').filter_map(|s| s.trim().parse().ok()).collect())
@@ -99,7 +95,7 @@ fn parse_node_animations(
                 anims.push(anim);
             }
             _ => {
-                parse_node_animations(&child, anims, effective_id, _svg);
+                parse_node_animations(&child, anims, effective_id);
             }
         }
     }
@@ -175,16 +171,22 @@ pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
         let combined = transforms.join(" ");
         // Get existing static transform and prepend it to preserve base positioning
         if let Some(existing) = crate::svg_edit::get_attribute(&result, id, "transform") {
-            // Check if existing transform looks like it's from animated values (contains animated patterns)
-            // If existing contains typical animated functions, it's likely already baked - replace entirely
-            let is_animated_only = existing.starts_with("translate(")
-                || existing.starts_with("rotate(")
-                || existing.starts_with("scale(");
-            if is_animated_only && !existing.contains("matrix(") {
-                // Purely animated transform, replace it
+            // Heuristic: detect if existing transform is purely from animation baking.
+            // We consider it "animated-only" if it's a single animated function (translate/rotate/scale/skew)
+            // with no additional components. This avoids clobbering mixed transforms like "translate(10 10) rotate(45)".
+            let trimmed = existing.trim();
+            let is_single_animated_func = (trimmed.starts_with("translate(")
+                || trimmed.starts_with("rotate(")
+                || trimmed.starts_with("scale(")
+                || trimmed.starts_with("skewX(")
+                || trimmed.starts_with("skewY("))
+                && trimmed.matches('(').count() == 1; // Only one function
+
+            if is_single_animated_func {
+                // Single animated transform, replace it
                 result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
             } else {
-                // Has static transform (e.g., matrix), prepend it to preserve base positioning
+                // Has static transform (matrix, multiple functions, etc), prepend it to preserve base positioning
                 let full_transform = format!("{} {}", existing, combined);
                 result = crate::svg_edit::set_attribute(&result, id, "transform", &full_transform);
             }
