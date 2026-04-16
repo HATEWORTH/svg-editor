@@ -1,0 +1,379 @@
+---
+name: Pull Request Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # Block fork PRs from self-hosted runners (security)
+  fork-guard:
+    name: Fork PR Guard
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - run: echo "Not a fork PR - proceeding"
+
+  # -------------------------------------------------------------------------
+  # CI -- Build and test
+  # -------------------------------------------------------------------------
+  ci:
+    name: CI
+    needs: fork-guard
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: Setup runner environment
+        shell: cmd
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\GitHub CLI>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\AppData\Roaming\npm>>"%GITHUB_PATH%"
+          echo CLAUDE_PATH=%USERPROFILE%\.local\bin\claude.exe>>"%GITHUB_ENV%"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+
+      - name: Build and test
+        shell: bash
+        run: cargo build --release
+
+  # -------------------------------------------------------------------------
+  # AGENT COUNCIL -- Parallel AI Reviews
+  # -------------------------------------------------------------------------
+
+  # Qwen Design Review (Head of Design)
+  design-review:
+    name: Design Review
+    needs: fork-guard
+    if: >-
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft
+    runs-on: self-hosted
+    timeout-minutes: 20
+    continue-on-error: true
+    outputs:
+      review_status: ${{ steps.review-action.outputs.review_status }}
+      review_artifact_name: ${{ steps.review-action.outputs.review_artifact_name }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: Setup runner environment
+        shell: cmd
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\GitHub CLI>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\AppData\Roaming\npm>>"%GITHUB_PATH%"
+          echo CLAUDE_PATH=%USERPROFILE%\.local\bin\claude.exe>>"%GITHUB_ENV%"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+          ref: ${{ github.head_ref }}
+
+      - name: Run design review
+        id: review-action
+        uses: ./.github/actions/openrouter-review
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          profile: 'design'
+
+  # Claude Quality Review
+  claude-quality-review:
+    name: Claude Quality Review
+    needs: fork-guard
+    if: >-
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft
+    runs-on: self-hosted
+    timeout-minutes: 30
+    outputs:
+      review_status: ${{ steps.review-action.outputs.review_status }}
+      review_artifact_name: ${{ steps.review-action.outputs.review_artifact_name }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Setup runner environment
+        shell: cmd
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\GitHub CLI>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\AppData\Roaming\npm>>"%GITHUB_PATH%"
+          echo CLAUDE_PATH=%USERPROFILE%\.local\bin\claude.exe>>"%GITHUB_ENV%"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+          ref: ${{ github.head_ref }}
+
+      - name: Run Claude quality review
+        id: review-action
+        uses: ./.github/actions/claude-review
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          profile: 'quality'
+
+  # OpenRouter General Review
+  openrouter-review:
+    name: OpenRouter General Review
+    needs: fork-guard
+    if: >-
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft
+    runs-on: self-hosted
+    timeout-minutes: 20
+    continue-on-error: true
+    outputs:
+      review_status: ${{ steps.review-action.outputs.review_status }}
+      review_artifact_name: ${{ steps.review-action.outputs.review_artifact_name }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: Setup runner environment
+        shell: cmd
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\GitHub CLI>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\AppData\Roaming\npm>>"%GITHUB_PATH%"
+          echo CLAUDE_PATH=%USERPROFILE%\.local\bin\claude.exe>>"%GITHUB_ENV%"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+          ref: ${{ github.head_ref }}
+
+      - name: Run OpenRouter review
+        id: review-action
+        uses: ./.github/actions/openrouter-review
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          profile: 'openrouter-general'
+
+  # -------------------------------------------------------------------------
+  # AUTO-FIX AGENT -- Responds to review feedback
+  # -------------------------------------------------------------------------
+  agent-review-response:
+    name: Agent Review Response
+    needs: [ci, design-review, claude-quality-review, openrouter-review]
+    if: |
+      always() &&
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'no-auto-fix')
+    runs-on: self-hosted
+    timeout-minutes: 30
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Setup runner environment
+        shell: cmd
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\GitHub CLI>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\AppData\Roaming\npm>>"%GITHUB_PATH%"
+          echo CLAUDE_PATH=%USERPROFILE%\.local\bin\claude.exe>>"%GITHUB_ENV%"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: false
+          token: ${{ secrets.AGENT_TOKEN }}
+          ref: ${{ github.head_ref }}
+
+      - name: Clean working directory
+        shell: bash
+        run: |
+          git checkout -- . 2>/dev/null || true
+          git clean -fd 2>/dev/null || true
+
+      - name: Check iteration count
+        id: iteration
+        uses: ./.github/actions/agent-iteration-check
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          max_iterations: '5'
+          agent_type: 'review-fix'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip if max iterations reached
+        if: steps.iteration.outputs.exceeded_max == 'true'
+        shell: bash
+        run: |
+          echo "Max iterations reached. Manual intervention required."
+
+      - name: Download review artifacts
+        if: steps.iteration.outputs.should_skip != 'true'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: '*-review-${{ github.run_id }}-${{ github.run_attempt }}'
+          merge-multiple: true
+          path: .
+
+      - name: Run agent review response
+        id: agent-fix
+        if: steps.iteration.outputs.should_skip != 'true'
+        shell: bash
+        env:
+          DESIGN_REVIEW_PATH: openrouter-review.md
+          CLAUDE_QUALITY_REVIEW_PATH: claude-quality-review.md
+          OPENROUTER_REVIEW_PATH: openrouter-review.md
+          BRANCH_NAME: ${{ github.head_ref }}
+          ITERATION_COUNT: ${{ steps.iteration.outputs.iteration_count }}
+        run: |
+          if ! command -v automation-cli &>/dev/null; then
+            echo "::warning::automation-cli not found on PATH - skipping review response"
+            exit 0
+          fi
+
+          # Check that at least one review artifact exists
+          if [ ! -f claude-quality-review.md ] && [ ! -f openrouter-review.md ]; then
+            echo "::warning::No review artifacts found - skipping review response"
+            exit 0
+          fi
+
+          automation-cli review respond \
+            "$PR_NUMBER" \
+            "$BRANCH_NAME" \
+            "$ITERATION_COUNT" \
+            "5"
+
+  # -------------------------------------------------------------------------
+  # FAILURE HANDLER -- Auto-fix CI failures
+  # -------------------------------------------------------------------------
+  agent-failure-handler:
+    name: Agent Failure Handler
+    needs: [ci, design-review, claude-quality-review, openrouter-review, agent-review-response]
+    if: |
+      failure() &&
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'no-auto-fix') &&
+      needs.ci.result == 'failure'
+    runs-on: self-hosted
+    timeout-minutes: 30
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_TOKEN: ${{ secrets.AGENT_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Setup runner environment
+        shell: cmd
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\GitHub CLI>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\.local\bin>>"%GITHUB_PATH%"
+          echo %USERPROFILE%\AppData\Roaming\npm>>"%GITHUB_PATH%"
+          echo CLAUDE_PATH=%USERPROFILE%\.local\bin\claude.exe>>"%GITHUB_ENV%"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: false
+          token: ${{ secrets.AGENT_TOKEN }}
+          ref: ${{ github.head_ref }}
+
+      - name: Clean working directory
+        shell: bash
+        run: |
+          git checkout -- . 2>/dev/null || true
+          git clean -fd 2>/dev/null || true
+
+      - name: Check iteration count
+        id: iteration
+        uses: ./.github/actions/agent-iteration-check
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          max_iterations: '5'
+          agent_type: 'failure-fix'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip if max iterations reached
+        if: steps.iteration.outputs.exceeded_max == 'true'
+        shell: bash
+        run: |
+          echo "Max iterations reached. Manual intervention required."
+          exit 0
+
+      - name: Run agent failure handler
+        id: agent-fix
+        if: steps.iteration.outputs.exceeded_max != 'true'
+        shell: bash
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+          ITERATION_COUNT: ${{ steps.iteration.outputs.iteration_count }}
+        run: |
+          if ! command -v automation-cli &>/dev/null; then
+            echo "::warning::automation-cli not found on PATH - skipping failure handler"
+            exit 0
+          fi
+
+          automation-cli review failure \
+            "$PR_NUMBER" \
+            "$BRANCH_NAME" \
+            "$ITERATION_COUNT" \
+            "5" \
+            "format,lint,test"
+
+  # -------------------------------------------------------------------------
+  # STATUS SUMMARY
+  # -------------------------------------------------------------------------
+  pr-status:
+    name: PR Status Summary
+    needs: [ci, design-review, claude-quality-review, openrouter-review, agent-review-response, agent-failure-handler]
+    if: always()
+    runs-on: self-hosted
+    steps:
+      - name: Setup runner environment
+        shell: cmd
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\GitHub CLI>>"%GITHUB_PATH%"
+
+      - name: Generate status summary
+        shell: bash
+        run: |
+          echo "## PR Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CI | ${{ needs.ci.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Design Review | ${{ needs.design-review.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Claude Quality Review | ${{ needs.claude-quality-review.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| OpenRouter Review | ${{ needs.openrouter-review.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Review Response | ${{ needs.agent-review-response.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failure Handler | ${{ needs.agent-failure-handler.result }} |" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.ci.result }}" == "failure" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "CI failed - review the logs" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi

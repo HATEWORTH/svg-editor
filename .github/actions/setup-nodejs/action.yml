@@ -1,0 +1,49 @@
+name: 'Setup Node.js'
+description: 'Ensure Node.js and CLI tools are available on the self-hosted runner'
+
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '22'
+  verify-cli:
+    description: 'Comma-separated list of CLI tools to verify (e.g., claude)'
+    required: false
+    default: ''
+
+outputs:
+  node-version:
+    description: 'Actual Node.js version used'
+    value: ${{ steps.setup.outputs.node-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify Node.js
+      id: setup
+      shell: bash
+      run: |
+        # Check if node is available
+        if command -v node &>/dev/null; then
+          ACTUAL_VERSION=$(node --version)
+          echo "Node.js version: $ACTUAL_VERSION"
+          echo "node-version=$ACTUAL_VERSION" >> $GITHUB_OUTPUT
+        else
+          echo "::error::Node.js is not installed on this runner"
+          exit 1
+        fi
+
+        # Verify CLI tools if requested
+        VERIFY_CLI="${{ inputs.verify-cli }}"
+        if [ -n "$VERIFY_CLI" ]; then
+          IFS=',' read -ra CLI_ARRAY <<< "$VERIFY_CLI"
+          for cli in "${CLI_ARRAY[@]}"; do
+            cli=$(echo "$cli" | xargs)
+            if command -v "$cli" &>/dev/null; then
+              echo "Found $cli: $(command -v $cli)"
+              $cli --version 2>/dev/null || echo "$cli version check skipped"
+            else
+              echo "::warning::$cli CLI not found in PATH"
+            fi
+          done
+        fi

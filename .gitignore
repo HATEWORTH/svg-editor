@@ -1,2 +1,6 @@
 .env
 target/
+
+# Review artifacts (downloaded during CI, should not be committed)
+claude-*-review.md
+openrouter-review.md

@@ -1,0 +1,172 @@
+name: 'Agent Iteration Check'
+description: 'Track agent auto-fix iterations based on PR comments to prevent infinite loops'
+
+inputs:
+  pr_number:
+    description: 'PR number'
+    required: true
+  max_iterations:
+    description: 'Maximum allowed iterations before stopping'
+    required: false
+    default: '5'
+  agent_type:
+    description: 'Agent type to track (review-fix or failure-fix). Each agent has separate iteration counts.'
+    required: true
+  github_token:
+    description: 'GitHub token for API operations'
+    required: true
+
+outputs:
+  iteration_count:
+    description: 'Current iteration count based on PR comments from this specific agent type'
+    value: ${{ steps.check.outputs.iteration_count }}
+  effective_max:
+    description: 'Effective max iterations after applying [CONTINUE] multipliers'
+    value: ${{ steps.check.outputs.effective_max }}
+  continue_count:
+    description: 'Number of [CONTINUE] comments found from admins'
+    value: ${{ steps.check.outputs.continue_count }}
+  is_agent_commit:
+    description: 'Whether the last commit was made by an agent'
+    value: ${{ steps.check.outputs.is_agent_commit }}
+  should_skip:
+    description: 'Whether to skip this run (max iterations reached)'
+    value: ${{ steps.check.outputs.should_skip }}
+  exceeded_max:
+    description: 'Whether max iterations have been exceeded'
+    value: ${{ steps.check.outputs.exceeded_max }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check iteration count
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        MAX_ITERATIONS: ${{ inputs.max_iterations }}
+        AGENT_TYPE: ${{ inputs.agent_type }}
+      run: |
+        echo "=== Agent Iteration Check ==="
+        echo "PR Number: $PR_NUMBER"
+        echo "Max Iterations: $MAX_ITERATIONS"
+        echo "Agent Type: $AGENT_TYPE"
+
+        # Check if last commit is an agent commit
+        AGENT_AUTHORS=("AI Review Agent" "AI Pipeline Agent" "AI Agent Bot")
+        LAST_COMMIT_AUTHOR=$(git log -1 --format='%an' 2>/dev/null || echo "")
+        echo "Last commit author: $LAST_COMMIT_AUTHOR"
+
+        IS_AGENT_COMMIT="false"
+        for author in "${AGENT_AUTHORS[@]}"; do
+          if [[ "$LAST_COMMIT_AUTHOR" == "$author" ]]; then
+            IS_AGENT_COMMIT="true"
+            echo "Detected agent commit via author name: $LAST_COMMIT_AUTHOR"
+            break
+          fi
+        done
+        echo "is_agent_commit=$IS_AGENT_COMMIT" >> $GITHUB_OUTPUT
+
+        # Try github-agents CLI first (faster, more accurate)
+        if command -v github-agents &>/dev/null; then
+          RESULT=$(github-agents iteration-check \
+            --pr "$PR_NUMBER" \
+            --agent-type "$AGENT_TYPE" \
+            --max-iterations "$MAX_ITERATIONS" \
+            --config ".agents.yaml" \
+            --format json 2>/dev/null || echo "")
+
+          if [ -n "$RESULT" ] && echo "$RESULT" | jq -e . >/dev/null 2>&1; then
+            echo "iteration_count=$(echo "$RESULT" | jq -r '.iteration_count')" >> $GITHUB_OUTPUT
+            echo "effective_max=$(echo "$RESULT" | jq -r '.effective_max')" >> $GITHUB_OUTPUT
+            echo "continue_count=$(echo "$RESULT" | jq -r '.continue_count')" >> $GITHUB_OUTPUT
+            echo "exceeded_max=$(echo "$RESULT" | jq -r '.exceeded_max')" >> $GITHUB_OUTPUT
+            echo "should_skip=$(echo "$RESULT" | jq -r '.should_skip')" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        fi
+
+        # Fallback: count agent metadata comments (exclude limit-reached notices)
+        echo "Falling back to comment-based counting..."
+        ITERATION_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+          --paginate --jq "[.[] | select((.body | contains(\"agent-metadata:type=${AGENT_TYPE}\")) and (.body | contains(\":limit-reached\") | not))] | length" \
+          2>/dev/null || echo "0")
+
+        # Parse admin list from .agents.yaml (fallback to empty if not found)
+        ADMIN_LIST=""
+        if [ -f ".agents.yaml" ]; then
+          # Extract agent_admins list entries (lines starting with "    - " under agent_admins:)
+          ADMIN_LIST=$(awk '/^  agent_admins:/{found=1; next} /^  [a-z]/{found=0} found && /^    - /{gsub(/^    - /, ""); print}' .agents.yaml | tr '\n' '|' | sed 's/|$//')
+        fi
+        echo "Parsed admin list: $ADMIN_LIST"
+
+        # Count [CONTINUE] comments only from authorized admins
+        if [ -n "$ADMIN_LIST" ]; then
+          CONTINUE_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --paginate --jq "[.[] | select((.body | test(\"\\\\[CONTINUE\\\\]\")) and (.user.login | test(\"^($ADMIN_LIST)\$\")))] | length" \
+            2>/dev/null || echo "0")
+        else
+          # No admins configured - don't count any [CONTINUE] comments
+          CONTINUE_COUNT="0"
+        fi
+
+        EFFECTIVE_MAX=$(( MAX_ITERATIONS + CONTINUE_COUNT * MAX_ITERATIONS ))
+        EXCEEDED_MAX="false"
+        SHOULD_SKIP="false"
+        if [ "$ITERATION_COUNT" -ge "$EFFECTIVE_MAX" ]; then
+          EXCEEDED_MAX="true"
+          SHOULD_SKIP="true"
+        fi
+
+        echo "iteration_count=$ITERATION_COUNT" >> $GITHUB_OUTPUT
+        echo "effective_max=$EFFECTIVE_MAX" >> $GITHUB_OUTPUT
+        echo "continue_count=$CONTINUE_COUNT" >> $GITHUB_OUTPUT
+        echo "exceeded_max=$EXCEEDED_MAX" >> $GITHUB_OUTPUT
+        echo "should_skip=$SHOULD_SKIP" >> $GITHUB_OUTPUT
+
+        if [ "$EXCEEDED_MAX" = "true" ]; then
+          # Map agent type to human-readable name
+          if [ "$AGENT_TYPE" = "review-fix" ]; then
+            AGENT_NAME="Review Response Agent"
+          else
+            AGENT_NAME="Failure Handler Agent"
+          fi
+
+          COMMENT_FILE=$(mktemp)
+          (
+            echo "## $AGENT_NAME - Iteration Limit Reached"
+            echo "<!-- agent-metadata:type=${AGENT_TYPE}:iteration=${ITERATION_COUNT}:limit-reached -->"
+            echo ""
+            echo "The **$AGENT_NAME** has reached the iteration limit (**${ITERATION_COUNT}/${EFFECTIVE_MAX}**)."
+            echo ""
+            echo "**What this means:**"
+            echo "- This specific agent has attempted to fix issues $ITERATION_COUNT times"
+            echo "- Further automated fixes from this agent have been paused"
+            echo "- Any remaining issues require manual attention"
+            echo ""
+            echo "**Note:** The review-fix and failure-fix agents have separate iteration counters."
+            echo ""
+            echo "**To allow more iterations:**"
+            echo "- An agent admin can comment \\\`[CONTINUE]\\\` to extend the limit by $MAX_ITERATIONS more iterations"
+            echo "- Current limit: $EFFECTIVE_MAX (base: $MAX_ITERATIONS + ${CONTINUE_COUNT}x extensions)"
+            echo "- Or address the issues manually"
+            echo "- Or add the \\\`no-auto-fix\\\` label to disable automated fixes entirely"
+            echo ""
+            echo "---"
+            echo "*This is a safety mechanism to prevent runaway automation.*"
+          ) > "$COMMENT_FILE"
+
+          gh pr comment "$PR_NUMBER" --body-file "$COMMENT_FILE" || \
+            echo "Warning: Failed to post iteration limit comment"
+          rm -f "$COMMENT_FILE"
+        fi
+
+        echo "=== Iteration Check Complete ==="
+        echo "  Agent Type: $AGENT_TYPE"
+        echo "  Iteration Count: $ITERATION_COUNT"
+        echo "  Effective Max: $EFFECTIVE_MAX"
+        echo "  Continue Count: $CONTINUE_COUNT"
+        echo "  Is Agent Commit: $IS_AGENT_COMMIT"
+        echo "  Should Skip: $SHOULD_SKIP"
+        echo "  Exceeded Max: $EXCEEDED_MAX"

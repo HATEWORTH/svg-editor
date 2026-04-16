@@ -1,0 +1,91 @@
+# .agents.yaml -- Multi-Agent System Configuration
+#
+# All agents run in AUTONOMOUS MODE for CI/CD automation.
+# Interactive prompts are disabled.
+
+enabled_agents:
+  - claude       # Anthropic Claude Code CLI (must be installed on runner)
+  - openrouter   # OpenRouter API (needs OPENROUTER_API_KEY secret)
+
+# Agent priorities for different task types
+agent_priorities:
+  pr_reviews:
+    - openrouter   # Design review (Head of Design, qwen) + general review
+    - claude       # Quality/architecture review
+  code_fixes:
+    - claude       # Most capable for automated fixes
+
+# Security settings
+security:
+  # Users who can trigger agent actions via comments (e.g., [CONTINUE])
+  # CRITICAL: Only add trusted human users
+  agent_admins:
+    - HATEWORTH
+
+  # Trusted comment sources (context provided to AI, not action triggers)
+  trusted_sources:
+    - HATEWORTH
+    - github-actions[bot]
+    - dependabot[bot]
+
+  autonomous_mode: true
+  require_sandbox: true
+  max_prompt_length: 10000
+  temp_file_cleanup: true
+  subprocess_timeout: 600    # 10 minutes max per agent call
+  memory_limit_mb: 500
+
+# Rate limiting
+rate_limits:
+  requests_per_minute: 10
+  requests_per_hour: 100
+  claude:
+    requests_per_minute: 20
+
+# Model configuration overrides
+model_overrides:
+  openrouter:
+    default_model: "qwen/qwen3.6-plus"
+
+# OpenRouter settings
+openrouter:
+  default_model: qwen/qwen3.6-plus
+  fallback_models:
+    - deepseek/deepseek-coder-v2-instruct
+
+# PR Review settings
+pr_review:
+  default_agent: claude
+  max_words: 500
+  condensation_threshold: 600
+  incremental_enabled: true
+  include_comment_context: true
+  verify_claims: true
+  reaction_config_url: "https://raw.githubusercontent.com/AndrewAltimit/Media/refs/heads/main/reaction/config.yaml"
+
+# Auto-fix settings
+automation:
+  inline_feedback_loop: true
+  max_auto_fix_iterations: 5
+  autoformat_first: true
+  auto_fix_categories:
+    - formatting
+    - linting
+    - type_errors
+    - unused_imports
+  skip_labels:
+    - no-auto-fix
+    - needs-human-review
+
+# Non-interactive flags per agent
+advanced:
+  debug_mode: false
+  temp_directory: /tmp/agents
+  max_retries: 2
+  retry_delay_seconds: 5
+  isolate_environment: true
+  # Safe in CI: agents run on self-hosted runner with no interactive terminal.
+  # --dangerously-skip-permissions auto-approves tool use since all prompts
+  # are pre-approved via .agents.yaml and the runner is sandboxed.
+  non_interactive_flags:
+    claude: ["--print", "--dangerously-skip-permissions"]
