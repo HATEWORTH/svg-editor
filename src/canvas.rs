@@ -308,7 +308,7 @@ impl CanvasState {
         let p = 40.0;
         let sx = (s.x - p * 2.0) / self.svg_width;
         let sy = (s.y - p * 2.0) / self.svg_height;
-        self.zoom = sx.min(sy); // No cap — fit to whatever size the SVG is
+        self.zoom = sx.min(sy).max(0.01); // No upper cap, but enforce 0.01 minimum
         self.pan = Vec2::new(
             (s.x - self.svg_width * self.zoom) / 2.0,
             (s.y - self.svg_height * self.zoom) / 2.0,
@@ -1874,8 +1874,9 @@ fn draw_dot_grid(p: &egui::Painter, r: Rect, zoom: f32, pan: Vec2) {
     let dot_r = (0.8 * (sp / 20.0).clamp(0.5, 1.5)).max(0.4);
 
     // Offset grid by pan so it scrolls with the canvas
-    let ox = pan.x % sp;
-    let oy = pan.y % sp;
+    // Use rem_euclid to guarantee positive offsets (% returns negative for negative pan)
+    let ox = pan.x.rem_euclid(sp);
+    let oy = pan.y.rem_euclid(sp);
 
     let sx = ((r.min.x - ox) / sp).floor() as i32;
     let ex = ((r.max.x - ox) / sp).ceil() as i32;
@@ -1888,8 +1889,8 @@ fn draw_dot_grid(p: &egui::Painter, r: Rect, zoom: f32, pan: Vec2) {
 
     for ix in sx..=ex {
         for iy in sy..=ey {
-            let x = ix as f32 * sp + ox + r.min.x.fract();
-            let y = iy as f32 * sp + oy + r.min.y.fract();
+            let x = ix as f32 * sp + ox;
+            let y = iy as f32 * sp + oy;
             if r.contains(Pos2::new(x, y)) {
                 p.circle_filled(Pos2::new(x, y), dot_r, c);
             }
