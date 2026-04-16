@@ -95,16 +95,20 @@ pub struct CanvasState {
     annotation_drag_start: Option<Pos2>,
     pub annotation_text_editing: bool,
     pub annotation_text_buffer: String,
+    // Shared font database (loaded once at startup for text rendering)
+    pub fontdb: std::sync::Arc<fontdb::Database>,
 }
 
 impl CanvasState {
     pub fn new() -> Self {
+        let mut fdb = fontdb::Database::new();
+        fdb.load_system_fonts();
         Self {
             zoom: 1.0,
             pan: Vec2::ZERO,
             svg_content: String::new(),
-            svg_width: 1920.0,
-            svg_height: 1080.0,
+            svg_width: 800.0,
+            svg_height: 600.0,
             texture: None,
             texture_dirty: true,
             selected_element: None,
@@ -147,6 +151,7 @@ impl CanvasState {
             annotation_drag_start: None,
             annotation_text_editing: false,
             annotation_text_buffer: String::new(),
+            fontdb: std::sync::Arc::new(fdb),
         }
     }
 
@@ -178,13 +183,34 @@ impl CanvasState {
     }
 
     fn parse_dimensions(&mut self) {
+        // Reset to default dimensions first (prevents inheriting from previous file)
+        self.svg_width = 800.0;
+        self.svg_height = 600.0;
+
         if let Ok(doc) = roxmltree::Document::parse(&self.svg_content) {
             let root = doc.root_element();
+
+            // Try viewBox first (most reliable)
             if let Some(vb) = root.attribute("viewBox") {
                 let p: Vec<f32> = vb.split_whitespace().filter_map(|s| s.parse().ok()).collect();
-                if p.len() == 4 {
+                if p.len() == 4 && p[2] > 0.0 && p[3] > 0.0 {
                     self.svg_width = p[2];
                     self.svg_height = p[3];
+                    return;
+                }
+            }
+
+            // Fallback to width/height attributes (skip percentages)
+            let w: Option<f32> = root.attribute("width")
+                .filter(|s| !s.contains('%'))
+                .and_then(|s| s.trim_end_matches("px").parse().ok());
+            let h: Option<f32> = root.attribute("height")
+                .filter(|s| !s.contains('%'))
+                .and_then(|s| s.trim_end_matches("px").parse().ok());
+            if let (Some(w), Some(h)) = (w, h) {
+                if w > 0.0 && h > 0.0 {
+                    self.svg_width = w;
+                    self.svg_height = h;
                 }
             }
         }
@@ -251,7 +277,7 @@ impl CanvasState {
             self.bboxes_svg_len = 0;
             return;
         }
-        let opt = usvg::Options::default();
+        let opt = usvg::Options { fontdb: self.fontdb.clone(), ..Default::default() };
         if let Ok(tree) = usvg::Tree::from_str(&self.svg_content, &opt) {
             let mut raw = Vec::new();
             collect_bboxes_ordered(&mut raw, tree.root(), usvg::Transform::identity());
@@ -310,7 +336,7 @@ impl CanvasState {
             self.svg_content.clone()
         };
 
-        let opt = usvg::Options::default();
+        let opt = usvg::Options { fontdb: self.fontdb.clone(), ..Default::default() };
         let tree = match usvg::Tree::from_str(&render_svg, &opt) {
             Ok(t) => t,
             Err(_) => return, // Keep existing texture on parse failure
@@ -1070,7 +1096,7 @@ impl CanvasState {
             }
         }
 
-        let opt = usvg::Options::default();
+        let opt = usvg::Options { fontdb: self.fontdb.clone(), ..Default::default() };
         let tree = usvg::Tree::from_str(&combined, &opt).map_err(|e| format!("Parse: {}", e))?;
         let w = self.svg_width as u32;
         let h = self.svg_height as u32;

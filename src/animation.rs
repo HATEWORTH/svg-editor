@@ -13,6 +13,7 @@ pub struct SmilAnimation {
     pub from: String,
     pub to: String,
     pub values: Vec<String>,   // for multi-step animations
+    pub key_times: Vec<f64>,   // normalized time stops (0.0..1.0)
     pub dur: f64,              // seconds
     pub begin: f64,            // seconds
     pub repeat_count: RepeatCount,
@@ -38,17 +39,40 @@ pub fn parse_animations(svg: &str) -> Vec<SmilAnimation> {
     anims
 }
 
-fn parse_node_animations(node: &roxmltree::Node, anims: &mut Vec<SmilAnimation>, parent_id: &str) {
+fn parse_node_animations(
+    node: &roxmltree::Node,
+    anims: &mut Vec<SmilAnimation>,
+    parent_id: &str,
+) {
     for child in node.children() {
         if !child.is_element() { continue; }
 
         let tag = child.tag_name().name();
-        let id = child.attribute("id").unwrap_or(parent_id);
+        let id = child.attribute("id").unwrap_or("");
+
+        // Use the element's own ID, or inherit parent's
+        let effective_id = if !id.is_empty() {
+            id
+        } else {
+            parent_id
+        };
 
         match tag {
             "animate" | "animateTransform" | "animateMotion" | "set" => {
+                // The parent of this animation element is the target
+                // Note: auto_assign_ids() runs before parsing, so all animatable elements should have IDs
+                if parent_id.is_empty() {
+                    continue; // Can't animate without a target ID
+                }
+
+                let target_id = parent_id.to_string();
+
+                let key_times: Vec<f64> = child.attribute("keyTimes")
+                    .map(|v| v.split(';').filter_map(|s| s.trim().parse().ok()).collect())
+                    .unwrap_or_default();
+
                 let anim = SmilAnimation {
-                    parent_id: parent_id.to_string(),
+                    parent_id: target_id,
                     tag: tag.to_string(),
                     attribute_name: child.attribute("attributeName").unwrap_or("").to_string(),
                     attribute_type: child.attribute("attributeType").unwrap_or("").to_string(),
@@ -58,6 +82,7 @@ fn parse_node_animations(node: &roxmltree::Node, anims: &mut Vec<SmilAnimation>,
                     values: child.attribute("values")
                         .map(|v| v.split(';').map(|s| s.trim().to_string()).collect())
                         .unwrap_or_default(),
+                    key_times,
                     dur: parse_time(child.attribute("dur").unwrap_or("0s")),
                     begin: parse_time(child.attribute("begin").unwrap_or("0s")),
                     repeat_count: match child.attribute("repeatCount").unwrap_or("1") {
@@ -70,7 +95,7 @@ fn parse_node_animations(node: &roxmltree::Node, anims: &mut Vec<SmilAnimation>,
                 anims.push(anim);
             }
             _ => {
-                parse_node_animations(&child, anims, id);
+                parse_node_animations(&child, anims, effective_id);
             }
         }
     }
@@ -95,6 +120,9 @@ pub fn total_duration(anims: &[SmilAnimation]) -> f64 {
 pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
     let mut result = svg.to_string();
 
+    // Collect transform animations per element to compose them
+    let mut transform_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
     for anim in anims {
         if anim.parent_id.is_empty() || anim.dur <= 0.0 { continue; }
 
@@ -118,13 +146,15 @@ pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
 
         match anim.tag.as_str() {
             "animate" => {
-                if let Some(value) = interpolate_value(&anim.from, &anim.to, &anim.values, progress) {
+                if let Some(value) = interpolate_value(&anim.from, &anim.to, &anim.values, &anim.key_times, progress) {
                     result = crate::svg_edit::set_attribute(&result, &anim.parent_id, &anim.attribute_name, &value);
                 }
             }
             "animateTransform" => {
-                if let Some(value) = interpolate_transform(&anim.transform_type, &anim.from, &anim.to, &anim.values, progress) {
-                    result = crate::svg_edit::set_attribute(&result, &anim.parent_id, "transform", &value);
+                if let Some(value) = interpolate_transform(&anim.transform_type, &anim.from, &anim.to, &anim.values, &anim.key_times, progress) {
+                    transform_map.entry(anim.parent_id.clone())
+                        .or_default()
+                        .push(value);
                 }
             }
             "set" => {
@@ -133,6 +163,27 @@ pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
                 }
             }
             _ => {}
+        }
+    }
+
+    // Apply composed transforms (multiple animateTransform on same element)
+    for (id, transforms) in &transform_map {
+        let combined = transforms.join(" ");
+        // Get existing static transform and append animated transforms to preserve base positioning.
+        // Since evaluate_at() starts fresh from the original SVG each frame, existing transforms
+        // are always the original static values, not previously baked animation values.
+        // Per SMIL spec, animated transforms should be applied after (i.e., appended to) static transforms.
+        if let Some(existing) = crate::svg_edit::get_attribute(&result, id, "transform") {
+            let trimmed = existing.trim();
+            if trimmed.is_empty() {
+                result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
+            } else {
+                // Append animated transforms to preserve static base positioning
+                let full_transform = format!("{} {}", trimmed, combined);
+                result = crate::svg_edit::set_attribute(&result, id, "transform", &full_transform);
+            }
+        } else {
+            result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
         }
     }
 
@@ -151,24 +202,24 @@ pub fn has_animations(svg: &str) -> bool {
 
 // ─── Interpolation helpers ───────────────────────────────
 
-fn interpolate_value(from: &str, to: &str, values: &[String], progress: f64) -> Option<String> {
+fn interpolate_value(from: &str, to: &str, values: &[String], key_times: &[f64], progress: f64) -> Option<String> {
     if !values.is_empty() {
-        return interpolate_values_list(values, progress);
+        return interpolate_values_list(values, key_times, progress);
     }
     if from.is_empty() || to.is_empty() { return None; }
 
     // Try numeric interpolation
     if let (Ok(f), Ok(t)) = (from.parse::<f64>(), to.parse::<f64>()) {
         let v = f + (t - f) * progress;
-        return Some(format!("{:.2}", v));
+        return Some(format_num(v));
     }
 
-    // Try multi-number interpolation (e.g. "0 0" -> "100 50")
-    let from_nums: Vec<f64> = from.split_whitespace().filter_map(|s| s.parse().ok()).collect();
-    let to_nums: Vec<f64> = to.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+    // Try multi-number interpolation (e.g. "0 0" -> "100 50" or "0 800; 0 -20; 0 0")
+    let from_nums: Vec<f64> = parse_num_list(from);
+    let to_nums: Vec<f64> = parse_num_list(to);
     if from_nums.len() == to_nums.len() && !from_nums.is_empty() {
         let interp: Vec<String> = from_nums.iter().zip(to_nums.iter())
-            .map(|(f, t)| format!("{:.2}", f + (t - f) * progress))
+            .map(|(f, t)| format_num(f + (t - f) * progress))
             .collect();
         return Some(interp.join(" "));
     }
@@ -182,20 +233,40 @@ fn interpolate_value(from: &str, to: &str, values: &[String], progress: f64) -> 
     if progress >= 0.5 { Some(to.to_string()) } else { Some(from.to_string()) }
 }
 
-fn interpolate_values_list(values: &[String], progress: f64) -> Option<String> {
+fn interpolate_values_list(values: &[String], key_times: &[f64], progress: f64) -> Option<String> {
     if values.len() < 2 { return values.first().cloned(); }
     let segments = values.len() - 1;
-    let scaled = progress * segments as f64;
-    let idx = (scaled.floor() as usize).min(segments - 1);
-    let local = scaled - idx as f64;
-    interpolate_value(&values[idx], &values[idx + 1], &[], local)
+
+    // Use keyTimes for non-uniform timing if available
+    let (idx, local) = if key_times.len() == values.len() {
+        // Find which segment we're in based on keyTimes
+        let mut seg = 0;
+        for i in 0..segments {
+            if progress >= key_times[i] && (i == segments - 1 || progress < key_times[i + 1]) {
+                seg = i;
+                break;
+            }
+        }
+        let seg_start = key_times[seg];
+        let seg_end = key_times[(seg + 1).min(key_times.len() - 1)];
+        let seg_dur = seg_end - seg_start;
+        let local = if seg_dur > 0.0 { ((progress - seg_start) / seg_dur).clamp(0.0, 1.0) } else { 1.0 };
+        (seg, local)
+    } else {
+        // Even spacing
+        let scaled = progress * segments as f64;
+        let idx = (scaled.floor() as usize).min(segments - 1);
+        (idx, scaled - idx as f64)
+    };
+
+    interpolate_value(&values[idx], &values[idx + 1], &[], &[], local)
 }
 
-fn interpolate_transform(ttype: &str, from: &str, to: &str, values: &[String], progress: f64) -> Option<String> {
+fn interpolate_transform(ttype: &str, from: &str, to: &str, values: &[String], key_times: &[f64], progress: f64) -> Option<String> {
     let interp = if !values.is_empty() {
-        interpolate_values_list(values, progress)?
+        interpolate_values_list(values, key_times, progress)?
     } else {
-        interpolate_value(from, to, &[], progress)?
+        interpolate_value(from, to, &[], &[], progress)?
     };
 
     match ttype {
@@ -240,5 +311,22 @@ fn parse_time(s: &str) -> f64 {
         s.trim_end_matches("min").parse::<f64>().unwrap_or(0.0) * 60.0
     } else {
         s.trim_end_matches('s').parse::<f64>().unwrap_or(0.0)
+    }
+}
+
+/// Parse a space/comma-separated list of numbers.
+fn parse_num_list(s: &str) -> Vec<f64> {
+    s.split(|c: char| c == ' ' || c == ',')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.trim().parse().ok())
+        .collect()
+}
+
+/// Format a number cleanly (no trailing zeros, reasonable precision).
+fn format_num(v: f64) -> String {
+    if (v - v.round()).abs() < 0.005 {
+        format!("{}", v.round() as i64)
+    } else {
+        format!("{:.2}", v)
     }
 }
