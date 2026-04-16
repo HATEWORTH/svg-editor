@@ -738,6 +738,40 @@ impl eframe::App for ForgeApp {
                 if self.needs_fit { self.canvas.fit_to_view(ui.available_size()); self.needs_fit = false; }
                 self.canvas.show(ui, ctx);
             });
+
+        // ─── Shortcuts overlay (bottom-left) ────────────
+        egui::Area::new(egui::Id::new("shortcuts-overlay"))
+            .anchor(egui::Align2::LEFT_BOTTOM, [44.0, -40.0])
+            .interactable(false)
+            .show(ctx, |ui: &mut egui::Ui| {
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160))
+                    .rounding(4.0)
+                    .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+                    .show(ui, |ui: &mut egui::Ui| {
+                        let dim = egui::Color32::from_rgb(140, 140, 140);
+                        let key_color = egui::Color32::from_rgb(200, 200, 200);
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        let shortcuts = [
+                            ("V", "Select"),
+                            ("A", "Node"),
+                            ("C", "Circle"),
+                            ("W", "Arrow"),
+                            ("T", "Text"),
+                            ("Ctrl+F", "Feedback"),
+                            ("Ctrl+Z", "Undo"),
+                            ("Ctrl+S", "Save"),
+                            ("Del", "Delete"),
+                            ("Space", "Play/Pause"),
+                        ];
+                        for (key, action) in &shortcuts {
+                            ui.horizontal(|ui: &mut egui::Ui| {
+                                ui.colored_label(key_color, egui::RichText::new(*key).monospace().size(11.0));
+                                ui.colored_label(dim, egui::RichText::new(*action).size(11.0));
+                            });
+                        }
+                    });
+            });
     }
 }
 
