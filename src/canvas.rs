@@ -278,7 +278,13 @@ impl CanvasState {
     /// screen pixel resolution. This keeps the image crisp at any zoom level
     /// without creating enormous textures.
     fn ensure_texture(&mut self, ctx: &egui::Context, canvas_rect: Rect) {
+        // Only re-render if content/zoom/pan changed — NOT when canvas_rect changes
+        // due to overlays like the feedback dialog
         if !self.texture_dirty && self.texture.is_some() {
+            return;
+        }
+        // Skip re-render if canvas rect is too small (dialog covering canvas)
+        if canvas_rect.width() < 100.0 || canvas_rect.height() < 100.0 {
             return;
         }
         self.texture_dirty = false;
