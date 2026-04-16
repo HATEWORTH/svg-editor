@@ -21,11 +21,13 @@ profiles:
       - Race conditions and TOCTOU bugs
       - Integer overflow/underflow, buffer issues
       - Cryptographic misuse (weak algorithms, hardcoded keys, bad RNG)
+      - Unsafe unwrap/panic paths in Rust (in library code)
       - Missing input validation at trust boundaries
 
       **Secondary Focus:**
       - Logic errors that produce incorrect results
       - Off-by-one errors, boundary conditions
+      - Null/None dereference risks
       - Resource leaks (file handles, connections, memory)
       - Error handling that swallows failures silently
 

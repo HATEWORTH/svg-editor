@@ -42,6 +42,11 @@ rate_limits:
   claude:
     requests_per_minute: 20
 
+# Model configuration overrides
+model_overrides:
+  openrouter:
+    default_model: "qwen/qwen3.6-plus"
+
 # OpenRouter settings
 openrouter:
   default_model: qwen/qwen3.6-plus
@@ -56,6 +61,7 @@ pr_review:
   incremental_enabled: true
   include_comment_context: true
   verify_claims: true
+  reaction_config_url: "https://raw.githubusercontent.com/AndrewAltimit/Media/refs/heads/main/reaction/config.yaml"
 
 # Auto-fix settings
 automation:
