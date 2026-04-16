@@ -169,24 +169,16 @@ pub fn evaluate_at(svg: &str, anims: &[SmilAnimation], t: f64) -> String {
     // Apply composed transforms (multiple animateTransform on same element)
     for (id, transforms) in &transform_map {
         let combined = transforms.join(" ");
-        // Get existing static transform and prepend it to preserve base positioning
+        // Get existing static transform and append animated transforms to preserve base positioning.
+        // Since evaluate_at() starts fresh from the original SVG each frame, existing transforms
+        // are always the original static values, not previously baked animation values.
+        // Per SMIL spec, animated transforms should be applied after (i.e., appended to) static transforms.
         if let Some(existing) = crate::svg_edit::get_attribute(&result, id, "transform") {
-            // Heuristic: detect if existing transform is purely from animation baking.
-            // We consider it "animated-only" if it's a single animated function (translate/rotate/scale/skew)
-            // with no additional components. This avoids clobbering mixed transforms like "translate(10 10) rotate(45)".
             let trimmed = existing.trim();
-            let is_single_animated_func = (trimmed.starts_with("translate(")
-                || trimmed.starts_with("rotate(")
-                || trimmed.starts_with("scale(")
-                || trimmed.starts_with("skewX(")
-                || trimmed.starts_with("skewY("))
-                && trimmed.matches('(').count() == 1; // Only one function
-
-            if is_single_animated_func {
-                // Single animated transform, replace it
+            if trimmed.is_empty() {
                 result = crate::svg_edit::set_attribute(&result, id, "transform", &combined);
             } else {
-                // Has static transform (matrix, multiple functions, etc), prepend it to preserve base positioning
+                // Append animated transforms to preserve static base positioning
                 let full_transform = format!("{} {}", existing, combined);
                 result = crate::svg_edit::set_attribute(&result, id, "transform", &full_transform);
             }
