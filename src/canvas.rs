@@ -299,7 +299,7 @@ impl CanvasState {
         } else if current_hash != self.bboxes_svg_hash {
             // Content changed but parse failed — clear stale bboxes
             self.element_bboxes.clear();
-            self.bboxes_svg_hash = 0;
+            self.bboxes_svg_hash = current_hash;
         }
         // If content unchanged and parse fails, keep previous bboxes (transient error)
     }
