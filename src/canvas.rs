@@ -308,7 +308,7 @@ impl CanvasState {
         let p = 40.0;
         let sx = (s.x - p * 2.0) / self.svg_width;
         let sy = (s.y - p * 2.0) / self.svg_height;
-        self.zoom = sx.min(sy).min(10.0);
+        self.zoom = sx.min(sy).clamp(0.01, 50.0); // Match scroll handler's zoom range
         self.pan = Vec2::new(
             (s.x - self.svg_width * self.zoom) / 2.0,
             (s.y - self.svg_height * self.zoom) / 2.0,
@@ -623,20 +623,20 @@ impl CanvasState {
 
         self.ensure_texture(ctx, cr);
 
-        draw_dot_grid(&painter, cr);
+        // Infinite dot grid — scales with zoom and pans with the canvas
+        draw_dot_grid(&painter, cr, self.zoom, self.pan);
 
-        // Document background: white rect at SVG bounds with shadow
+        // Subtle document bounds outline (no filled white background)
         {
             let sr = Rect::from_min_size(
                 Pos2::new(cr.min.x + self.pan.x, cr.min.y + self.pan.y),
                 Vec2::new(self.svg_width * self.zoom, self.svg_height * self.zoom),
             );
-            painter.rect_filled(
-                sr.translate(Vec2::new(3.0, 3.0)),
-                4.0,
-                Color32::from_rgba_unmultiplied(0, 0, 0, 60),
+            painter.rect_stroke(
+                sr,
+                0.0,
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 30)),
             );
-            painter.rect_filled(sr, 0.0, Color32::WHITE);
         }
 
         // Draw SVG content — viewport-rendered texture fills the canvas area
@@ -657,7 +657,7 @@ impl CanvasState {
                 let sc = ui.input(|i| i.smooth_scroll_delta.y);
                 if sc != 0.0 {
                     let f = if sc > 0.0 { 1.1f32 } else { 0.9f32 };
-                    let nz = (self.zoom * f).clamp(0.05, 20.0);
+                    let nz = (self.zoom * f).clamp(0.01, 50.0);
                     let s = nz / self.zoom;
                     let mx = m.x - cr.min.x;
                     let my = m.y - cr.min.y;
@@ -1857,16 +1857,43 @@ fn opposite_point(bbox: Rect, handle: u8) -> Pos2 {
     }
 }
 
-fn draw_dot_grid(p: &egui::Painter, r: Rect) {
-    let sp = 20.0;
-    let c = Color32::from_rgba_unmultiplied(255, 255, 255, 18);
-    let sx = (r.min.x / sp).floor() as i32;
-    let ex = (r.max.x / sp).ceil() as i32;
-    let sy = (r.min.y / sp).floor() as i32;
-    let ey = (r.max.y / sp).ceil() as i32;
+/// Infinite dot grid that scales with zoom and pans with the canvas.
+/// Grid spacing adapts to zoom level to stay visually consistent.
+fn draw_dot_grid(p: &egui::Painter, r: Rect, zoom: f32, pan: Vec2) {
+    // Base spacing in SVG units — adapts so dots don't get too dense or sparse
+    let base_spacing = if zoom > 2.0 { 10.0 }
+        else if zoom > 0.5 { 20.0 }
+        else if zoom > 0.1 { 50.0 }
+        else { 100.0 };
+    let sp = base_spacing * zoom; // Screen-space spacing
+
+    if sp < 4.0 { return; } // Too dense to render
+
+    let alpha = ((sp / 20.0).clamp(0.3, 1.0) * 22.0) as u8;
+    let c = Color32::from_rgba_unmultiplied(255, 255, 255, alpha);
+    let dot_r = (0.8 * (sp / 20.0).clamp(0.5, 1.5)).max(0.4);
+
+    // Offset grid by pan so it scrolls with the canvas
+    // Use rem_euclid to guarantee positive offsets (% returns negative for negative pan)
+    let ox = pan.x.rem_euclid(sp);
+    let oy = pan.y.rem_euclid(sp);
+
+    let sx = ((r.min.x - ox) / sp).floor() as i32;
+    let ex = ((r.max.x - ox) / sp).ceil() as i32;
+    let sy = ((r.min.y - oy) / sp).floor() as i32;
+    let ey = ((r.max.y - oy) / sp).ceil() as i32;
+
+    // Clamp to reasonable count to avoid freezing on extreme zoom-out
+    let count = (ex - sx) as i64 * (ey - sy) as i64;
+    if count > 10_000 { return; }
+
     for ix in sx..=ex {
         for iy in sy..=ey {
-            p.circle_filled(Pos2::new(ix as f32 * sp, iy as f32 * sp), 0.8, c);
+            let x = ix as f32 * sp + ox;
+            let y = iy as f32 * sp + oy;
+            if r.contains(Pos2::new(x, y)) {
+                p.circle_filled(Pos2::new(x, y), dot_r, c);
+            }
         }
     }
 }
