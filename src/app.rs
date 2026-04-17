@@ -754,18 +754,21 @@ impl eframe::App for ForgeApp {
                     .show(ui, |ui: &mut egui::Ui| {
                         let dim = egui::Color32::from_rgb(140, 140, 140);
                         let key_color = egui::Color32::from_rgb(200, 200, 200);
-                        ui.spacing_mut().item_spacing.y = 1.0;
+                        ui.spacing_mut().item_spacing.y = 2.0;
                         let shortcuts = [
                             ("V", "Select"),
                             ("A", "Node"),
-                            ("C", "Circle"),
-                            ("W", "Arrow"),
-                            ("T", "Text"),
-                            ("Ctrl+F", "Feedback"),
+                            ("C", "Annotate Circle"),
+                            ("W", "Annotate Arrow"),
+                            ("T", "Annotate Text"),
+                            ("Ctrl+Click", "Multi-select"),
+                            ("Ctrl+F", "Export Feedback"),
                             ("Ctrl+Z", "Undo"),
                             ("Ctrl+S", "Save"),
                             ("Del", "Delete"),
                             ("Space", "Play/Pause"),
+                            ("Scroll", "Zoom"),
+                            ("Mid-drag", "Pan"),
                         ];
                         for (key, action) in &shortcuts {
                             ui.horizontal(|ui: &mut egui::Ui| {

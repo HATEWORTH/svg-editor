@@ -69,7 +69,8 @@ profiles:
       - Backwards compatibility concerns
 
       **Do NOT report:** security issues (another reviewer handles those), style issues,
-      naming preferences, missing docs, or anything caught by linters/formatters.
+      naming preferences, missing docs, anything caught by linters/formatters,
+      hardcoded colors (app is dark-mode only by design), or egui theme system suggestions.
 
   # General reviewer (OpenRouter / Qwen)
   openrouter-general:
@@ -94,4 +95,6 @@ profiles:
       - Test gaps for critical paths
 
       **Do NOT report:** style issues caught by formatters, security issues (another
-      reviewer handles those), or architectural concerns (another reviewer handles those).
+      reviewer handles those), architectural concerns (another reviewer handles those),
+      hardcoded colors or theme suggestions (app is dark-mode only by design),
+      or accessibility font-size opinions on overlay/HUD elements.

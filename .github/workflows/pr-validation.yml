@@ -219,7 +219,7 @@ jobs:
         uses: ./.github/actions/agent-iteration-check
         with:
           pr_number: ${{ github.event.pull_request.number }}
-          max_iterations: '5'
+          max_iterations: '2'
           agent_type: 'review-fix'
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -264,7 +264,7 @@ jobs:
             "$PR_NUMBER" \
             "$BRANCH_NAME" \
             "$ITERATION_COUNT" \
-            "5"
+            "2"
 
   # -------------------------------------------------------------------------
   # FAILURE HANDLER -- Auto-fix CI failures
@@ -312,7 +312,7 @@ jobs:
         uses: ./.github/actions/agent-iteration-check
         with:
           pr_number: ${{ github.event.pull_request.number }}
-          max_iterations: '5'
+          max_iterations: '2'
           agent_type: 'failure-fix'
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -340,7 +340,7 @@ jobs:
             "$PR_NUMBER" \
             "$BRANCH_NAME" \
             "$ITERATION_COUNT" \
-            "5" \
+            "2" \
             "format,lint,test"
 
   # -------------------------------------------------------------------------
