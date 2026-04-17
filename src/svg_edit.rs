@@ -288,11 +288,9 @@ pub fn set_visibility(svg: &str, element_id: &str, visible: bool) -> String {
             .split(';')
             .map(|s| s.trim())
             .filter(|s| {
-                !s.is_empty()
-                    && !s.starts_with("display:none")
-                    && !s.starts_with("display: none")
-                    && !s.starts_with("visibility:hidden")
-                    && !s.starts_with("visibility: hidden")
+                if s.is_empty() { return false; }
+                let lower = s.to_lowercase().replace(' ', "");
+                !lower.starts_with("display:none") && !lower.starts_with("visibility:hidden")
             })
             .collect::<Vec<_>>()
             .join(";");

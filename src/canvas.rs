@@ -57,9 +57,9 @@ pub struct CanvasState {
     redo_stack: Vec<String>,
     pub svg_modified: bool,
     element_bboxes: Vec<(String, Rect)>,
-    /// Length of SVG content when bboxes were last successfully computed.
+    /// Hash of SVG content when bboxes were last successfully computed.
     /// Used to detect if content changed when parse fails.
-    bboxes_svg_len: usize,
+    bboxes_svg_hash: u64,
     // Tool
     pub tool: EditTool,
     // Resize state
@@ -124,7 +124,7 @@ impl CanvasState {
             redo_stack: Vec::new(),
             svg_modified: false,
             element_bboxes: Vec::new(),
-            bboxes_svg_len: 0,
+            bboxes_svg_hash: 0,
             tool: EditTool::Select,
             resize_anchor: Pos2::ZERO,
             resize_orig_bbox: Rect::NOTHING,
@@ -278,7 +278,7 @@ impl CanvasState {
     fn rebuild_bboxes(&mut self) {
         if self.svg_content.is_empty() {
             self.element_bboxes.clear();
-            self.bboxes_svg_len = 0;
+            self.bboxes_svg_hash = 0;
             return;
         }
         let opt = usvg::Options { fontdb: self.fontdb.clone(), ..Default::default() };
@@ -294,12 +294,11 @@ impl CanvasState {
             }
             deduped.reverse();
             self.element_bboxes = deduped;
-            self.bboxes_svg_len = self.svg_content.len();
-        } else if self.svg_content.len() != self.bboxes_svg_len {
-            // Content changed but parse failed - clear stale bboxes to avoid
-            // misaligned selection handles pointing to outdated coordinates
+            self.bboxes_svg_hash = simple_hash(&self.svg_content);
+        } else if simple_hash(&self.svg_content) != self.bboxes_svg_hash {
+            // Content changed but parse failed — clear stale bboxes
             self.element_bboxes.clear();
-            self.bboxes_svg_len = 0;
+            self.bboxes_svg_hash = 0;
         }
         // If content unchanged and parse fails, keep previous bboxes (transient error)
     }
@@ -1869,6 +1868,16 @@ fn draw_dot_grid(p: &egui::Painter, r: Rect) {
             p.circle_filled(Pos2::new(ix as f32 * sp, iy as f32 * sp), 0.8, c);
         }
     }
+}
+
+/// Simple FNV-1a hash for change detection (not cryptographic).
+fn simple_hash(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 fn apply_transform(r: Rect, t: &usvg::Transform) -> Rect {
