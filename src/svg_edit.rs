@@ -289,7 +289,8 @@ pub fn set_visibility(svg: &str, element_id: &str, visible: bool) -> String {
             .map(|s| s.trim())
             .filter(|s| {
                 if s.is_empty() { return false; }
-                let lower = s.to_lowercase().replace(' ', "");
+                // Lowercase and strip spaces in one pass to avoid extra allocation
+                let lower: String = s.chars().filter(|c| !c.is_whitespace()).flat_map(|c| c.to_lowercase()).collect();
                 !lower.starts_with("display:none") && !lower.starts_with("visibility:hidden")
             })
             .collect::<Vec<_>>()

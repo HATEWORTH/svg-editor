@@ -281,6 +281,7 @@ impl CanvasState {
             self.bboxes_svg_hash = 0;
             return;
         }
+        let current_hash = simple_hash(&self.svg_content);
         let opt = usvg::Options { fontdb: self.fontdb.clone(), ..Default::default() };
         if let Ok(tree) = usvg::Tree::from_str(&self.svg_content, &opt) {
             let mut raw = Vec::new();
@@ -294,8 +295,8 @@ impl CanvasState {
             }
             deduped.reverse();
             self.element_bboxes = deduped;
-            self.bboxes_svg_hash = simple_hash(&self.svg_content);
-        } else if simple_hash(&self.svg_content) != self.bboxes_svg_hash {
+            self.bboxes_svg_hash = current_hash;
+        } else if current_hash != self.bboxes_svg_hash {
             // Content changed but parse failed — clear stale bboxes
             self.element_bboxes.clear();
             self.bboxes_svg_hash = 0;
